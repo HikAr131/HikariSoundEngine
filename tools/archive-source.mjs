@@ -171,7 +171,8 @@ try {
     const tarFile = path.join(scratch, `${prefix.split('/').at(-1)}.tar`);
     const staged = file => path.join(staging, ...file.split('/'));
     git(['archive', '--format=tar', `--prefix=${prefix}/`, `--output=${tarFile}`, pin], repo);
-    run('tar.exe', ['-xf', tarFile, '-C', staging]);
+    // Git Bash puts GNU tar first on PATH, which misreads drive-letter paths; use the Windows bsdtar.
+    run(path.join(process.env.SystemRoot ?? '', 'System32', 'tar.exe'), ['-xf', tarFile, '-C', staging]);
     for (const { path: file } of tree.files) if (!fs.existsSync(staged(file))) throw Error(`Git archive omitted tracked source: ${file}`);
     const parents = new Set();
     for (const item of tree.omitted) {
@@ -214,7 +215,7 @@ try {
   await verifyExtracted(staging);
   const zipTemporary = path.join(scratch, 'source.zip');
   const zipper = path.join(scratch, 'zip.ps1');
-  await fsp.writeFile(zipper, `param([string]$Source,[string]$Zip,[string]$Extract)\n$ErrorActionPreference = 'Stop'\nAdd-Type -AssemblyName System.IO.Compression.FileSystem\n[IO.Compression.ZipFile]::CreateFromDirectory($Source,$Zip,[IO.Compression.CompressionLevel]::Optimal,$false)\n[IO.Compression.ZipFile]::ExtractToDirectory($Zip,$Extract)\n`);
+  await fsp.writeFile(zipper, `param([string]$Source,[string]$Zip,[string]$Extract)\n$ErrorActionPreference = 'Stop'\nAdd-Type -AssemblyName System.IO.Compression.FileSystem\n[AppContext]::SetSwitch('Switch.System.IO.Compression.ZipFile.UseBackslash', $false)\n[IO.Compression.ZipFile]::CreateFromDirectory($Source,$Zip,[IO.Compression.CompressionLevel]::Optimal,$false)\n$archive = [IO.Compression.ZipFile]::OpenRead($Zip)\ntry { if (@($archive.Entries | Where-Object { $_.FullName.Contains([char]92) }).Count) { throw 'ZIP entry names must use forward slashes' } } finally { $archive.Dispose() }\n[IO.Compression.ZipFile]::ExtractToDirectory($Zip,$Extract)\n`);
   run('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', zipper, '-Source', staging, '-Zip', zipTemporary, '-Extract', extracted]);
   const extractedManifest = await verifyExtracted(extracted);
   // Verify project source lists and patch applicability using the actual extracted files.
