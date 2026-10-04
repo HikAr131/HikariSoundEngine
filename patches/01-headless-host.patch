@@ -1,0 +1,472 @@
+# Hikari upstream integration: isolated registry, headless failures, host DSP/default hooks.
+diff --git a/dsp/DfxDspPrivate.cpp b/dsp/DfxDspPrivate.cpp
+index e132da0..4a835d1 100644
+--- a/dsp/DfxDspPrivate.cpp
++++ b/dsp/DfxDspPrivate.cpp
+@@ -1,3 +1,4 @@
++// Hikari modification 2026-10-04: isolated headless host integration; see MODIFICATIONS.md.
+ /*
+ FxSound
+ Copyright (C) 2025  FxSound LLC
+@@ -18,6 +19,7 @@ GNU Affero General Public License for more details.
+ You should have received a copy of the GNU Affero General Public License
+ along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ */
++#include <stdexcept>
+ #include "u_DfxDsp.h"
+ #include "codedefs.h"
+ #include "DfxSdk.h"
+@@ -35,7 +37,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ #include "spectrum.h"
+ #include "SurroundSyn.h"
+ 
+-#define DFXG_REGISTRY_DFX_PRODUCT_NAME_WIDE		L"DFX"
++#define DFXG_REGISTRY_DFX_PRODUCT_NAME_WIDE		L"Hikari1U\\SoundEngine"
+ #define DFXG_DISPLAYED_DFX_PRODUCT_NAME_WIDE    L"FxSound"
+ #define DFXP_VENDOR_CODE_UNIVERSAL			  23
+ 
+@@ -53,6 +55,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ DfxDspPrivate::DfxDspPrivate()
+ {
+ 	dfxp_handle_ = NULL;
++	preset_list_handle_ = NULL;
+ 	slout1_ = NULL;
+ 	midi_to_rval_qnt_handle_ = NULL;
+ 	rval_to_midi_qnt_handle_ = NULL;
+@@ -66,7 +69,7 @@ DfxDspPrivate::DfxDspPrivate()
+ 
+ 	// Initialize the processing mode
+ 	if (dfxpInit(&dfxp_handle_,
+-		L"DFX", 23,
++		L"Hikari1U\\SoundEngine", 23,
+ 		14, 1, IS_FALSE,
+ 		IS_FALSE, 0,
+ 		IS_FALSE,
+@@ -74,7 +77,7 @@ DfxDspPrivate::DfxDspPrivate()
+ 		IS_FALSE, slout1_) != OKAY)
+ 	{
+ 		//return(NOT_OKAY);
+-		MessageBox(NULL, L"TTEST", L"TEST", MB_OK);
++		throw std::runtime_error("DfxDsp initialization failed");
+ 	}
+ 
+ 	// Make sure the vocal reduction is turned off 
+diff --git a/audiopassthru/src/sndDevices/sndDevicesReg.cpp b/audiopassthru/src/sndDevices/sndDevicesReg.cpp
+index be00d5c..d9747d6 100644
+--- a/audiopassthru/src/sndDevices/sndDevicesReg.cpp
++++ b/audiopassthru/src/sndDevices/sndDevicesReg.cpp
+@@ -1,3 +1,4 @@
++// Hikari modification 2026-10-04: isolated headless host integration; see MODIFICATIONS.md.
+ /*
+ FxSound
+ Copyright (C) 2025  FxSound LLC
+@@ -30,7 +31,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ #include "u_sndDevices.h"
+ #include "sndDevices.h"
+ 
+-#define DFXG_REGISTRY_DFX_PRODUCT_NAME_WIDE		L"DFX"
++#define DFXG_REGISTRY_DFX_PRODUCT_NAME_WIDE		L"Hikari1U\\SoundEngine"
+ #define DFXP_VENDOR_CODE_UNIVERSAL			  23
+ #define DFX_VERSION               13.028
+ 
+diff --git a/dsp/ptutil/include/codedefs.h b/dsp/ptutil/include/codedefs.h
+index 64ddb41..2bb40c5 100644
+--- a/dsp/ptutil/include/codedefs.h
++++ b/dsp/ptutil/include/codedefs.h
+@@ -1,3 +1,5 @@
++// Hikari modification 2026-10-04: isolated headless host integration; see MODIFICATIONS.md.
++#include "hikari_upstream_logging.h"
+ /*
+ FxSound
+ Copyright (C) 2025  FxSound LLC
+@@ -100,7 +102,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ 		static int ptDebugNotOkay(wchar_t *wcp_file, wchar_t *wcp_line)
+ 		{
+ 			if( IsDebuggerPresent() == 0 )
+-				MessageBoxW(NULL, wcp_file, wcp_line, MB_OK);
++				hikariLogUpstreamError(wcp_file);
+ 			else
+ 				DebugBreak();
+ 			return(NOT_OKAY_NO_BREAK);
+@@ -110,7 +112,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ 		static int ptDebugNotOkay(char *cp_file, char *cp_line)
+ 		{
+ 			if( IsDebuggerPresent() == 0 )
+-				MessageBoxA(NULL, cp_file, cp_line, MB_OK);
++				hikariLogUpstreamErrorA(cp_file);
+ 			else
+ 				DebugBreak();
+ 			return(NOT_OKAY_NO_BREAK);
+@@ -122,14 +124,14 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ 	#ifdef UNICODE
+ 		static int ptReleaseNotOkay(wchar_t *wcp_file, wchar_t *wcp_line)
+ 		{
+-			MessageBoxW(NULL, wcp_file, wcp_line, MB_OK);
++			hikariLogUpstreamError(wcp_file);
+ 			return(NOT_OKAY_NO_BREAK);
+ 		}
+ 		#define NOT_OKAY ptReleaseNotOkay(PT_WFILE, PT_LINE_STRING)
+ 	#else
+ 		static int ptReleaseNotOkay(char *cp_file, char *cp_line)
+ 		{
+-			MessageBoxA(NULL, cp_file, cp_line, MB_OK);
++			hikariLogUpstreamErrorA(cp_file);
+ 			return(NOT_OKAY_NO_BREAK);
+ 		}
+ 		#define NOT_OKAY ptReleaseNotOkay( __FILE__, PT_LINE_STRING_CHAR)
+diff --git a/audiopassthru/include/codedefs.h b/audiopassthru/include/codedefs.h
+index 8bc84ab..000e202 100644
+--- a/audiopassthru/include/codedefs.h
++++ b/audiopassthru/include/codedefs.h
+@@ -1,3 +1,5 @@
++// Hikari modification 2026-10-04: isolated headless host integration; see MODIFICATIONS.md.
++#include "hikari_upstream_logging.h"
+ /*
+ FxSound
+ Copyright (C) 2025  FxSound LLC
+@@ -100,7 +102,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ 		static int ptDebugNotOkay(wchar_t *wcp_file, wchar_t *wcp_line)
+ 		{
+ 			if( IsDebuggerPresent() == 0 )
+-				MessageBoxW(NULL, wcp_file, wcp_line, MB_OK);
++				hikariLogUpstreamError(wcp_file);
+ 			else
+ 				DebugBreak();
+ 			return(NOT_OKAY_NO_BREAK);
+@@ -110,7 +112,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ 		static int ptDebugNotOkay(char *cp_file, char *cp_line)
+ 		{
+ 			if( IsDebuggerPresent() == 0 )
+-				MessageBoxA(NULL, cp_file, cp_line, MB_OK);
++				hikariLogUpstreamErrorA(cp_file);
+ 			else
+ 				DebugBreak();
+ 			return(NOT_OKAY_NO_BREAK);
+@@ -125,7 +127,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ 			if (wcp_file != nullptr)
+ 			{
+ 				const wchar_t* filename = wcsrchr(wcp_file, L'\\');
+-				MessageBoxW(NULL, filename ? (filename+1) : wcp_file, wcp_line, MB_OK);
++				hikariLogUpstreamError(wcp_file);
+ 			}
+ 			return(NOT_OKAY_NO_BREAK);
+ 		}
+@@ -133,7 +135,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ 	#else
+ 		static int ptReleaseNotOkay(char *cp_file, char *cp_line)
+ 		{
+-			MessageBoxA(NULL, cp_file, cp_line, MB_OK);
++			hikariLogUpstreamErrorA(cp_file);
+ 			return(NOT_OKAY_NO_BREAK);
+ 		}
+ 		#define NOT_OKAY ptReleaseNotOkay( __FILE__, PT_LINE_STRING_CHAR)
+diff --git a/audiopassthru/src/operatingSystem/operatingSystem.cpp b/audiopassthru/src/operatingSystem/operatingSystem.cpp
+index 9cd8f40..69901d2 100644
+--- a/audiopassthru/src/operatingSystem/operatingSystem.cpp
++++ b/audiopassthru/src/operatingSystem/operatingSystem.cpp
+@@ -1,3 +1,4 @@
++// Hikari modification 2026-10-04: isolated headless host integration; see MODIFICATIONS.md.
+ /*
+ FxSound
+ Copyright (C) 2025  FxSound LLC
+@@ -452,7 +453,7 @@ int PT_DECLSPEC operatingSystemGetLastErrorMessage(DWORD dwLastErrorCode, wchar_
+ 		LocalSize(lpDisplayBuf) / sizeof(TCHAR),
+ 		TEXT("Error code %d: %s"),
+ 		dw, lpMsgBuf);
+-	MessageBox(NULL, (LPCTSTR)lpDisplayBuf, TEXT("Error"), MB_OK);
++	hikariLogUpstreamError((LPCTSTR)lpDisplayBuf);
+ 
+ 	LocalFree(lpMsgBuf);
+ 	LocalFree(lpDisplayBuf);
+diff --git a/audiopassthru/src/sndDevices/sndDevicesInit.cpp b/audiopassthru/src/sndDevices/sndDevicesInit.cpp
+index acd1f8f..2fdfa7a 100644
+--- a/audiopassthru/src/sndDevices/sndDevicesInit.cpp
++++ b/audiopassthru/src/sndDevices/sndDevicesInit.cpp
+@@ -1,3 +1,4 @@
++// Hikari modification 2026-10-04: isolated headless host integration; see MODIFICATIONS.md.
+ /*
+ FxSound
+ Copyright (C) 2025  FxSound LLC
+@@ -30,7 +31,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ #include <Functiondiscoverykeys_devpkey.h>
+ #include <endpointvolume.h>
+ 
+-#include "BladeMP3EncDLL.h"
++// Unused MP3 encoder header excluded from the headless host.
+ #include "slout.h"
+ #include "reg.h"
+ #include "mry.h"
+diff --git a/audiopassthru/src/AudioPassthru/AudioPassthruPrivate.cpp b/audiopassthru/src/AudioPassthru/AudioPassthruPrivate.cpp
+index 5a5256b..098c4eb 100644
+--- a/audiopassthru/src/AudioPassthru/AudioPassthruPrivate.cpp
++++ b/audiopassthru/src/AudioPassthru/AudioPassthruPrivate.cpp
+@@ -1,3 +1,4 @@
++// Hikari modification 2026-10-04: isolated headless host integration; see MODIFICATIONS.md.
+ /*
+ FxSound
+ Copyright (C) 2025  FxSound LLC
+@@ -17,6 +18,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ */
+ 
+ //#include "stdafx.h"
++#include "hikari_upstream_hooks.h"
+ #include "u_AudioPassthru.h"
+ #include "sndDevices.h"
+ 
+@@ -530,15 +532,6 @@ DWORD AudioPassthruPrivate::threadWorker(void)
+ 			/* Make sure processing module has the current format settings */
+ 			//if (dfxpUniversalSetSignalFormat(cast_handle->dfxp_hdl, pwfx->wBitsPerSample, pwfx->nChannels, pwfx->nSamplesPerSec, i_valid_bits) != OKAY)
+ 				//return(NOT_OKAY);
+-			if (p_dfx_dsp_->setSignalFormat(pwfx->wBitsPerSample, pwfx->nChannels, pwfx->nSamplesPerSec, i_valid_bits) != OKAY)
+-			{
+-				// In Release build, initially setSignalFormat() will return NOT OKAY so execution will hit here and throws up message box due to return NOT_OAKY.
+-				// However, it doesn't happen in Debug build. Workaround is just comment out return(NOT_OKAY) so it won't throw up message boxes in Release build
+-				// and eventually it will start to return OKAY.
+-				//return(NOT_OKAY);
+-			}
+-				
+-			
+ 
+ 			// 2016-08-25: Workaround for crashing when playback device has only one channel (mono). For example, a Bleutooth headset is mono. When such
+ 			// device is selected as the playback device, we do not apply DFX/DSP processing to the buffer for now. Otherwise it will crash.
+@@ -548,7 +541,7 @@ DWORD AudioPassthruPrivate::threadWorker(void)
+ 				// Apply DFX processing here using data and format vars above. Format will always be 32 bit floating point.
+ 			//	if (dfxpUniversalModifySamples(cast_handle->dfxp_hdl, (short int *)fp_buffer, (short int *)fp_buffer, numSampleSets, i_check_for_duplicate_buffers) != OKAY)
+ 				//	return(NOT_OKAY);
+-				p_dfx_dsp_->processAudio((short int *)fp_buffer, (short int *)fp_buffer, numSampleSets, i_check_for_duplicate_buffers);
++				hikariProcessAudio(p_dfx_dsp_, fp_buffer, numSampleSets, pwfx->wBitsPerSample, pwfx->nChannels, pwfx->nSamplesPerSec, i_valid_bits, i_check_for_duplicate_buffers);
+ 			}
+ 
+ 			/* Check if thread has been signaled to end */
+diff --git a/audiopassthru/src/sndDevices/sndDevicesSet.cpp b/audiopassthru/src/sndDevices/sndDevicesSet.cpp
+index 95cf0d0..2e5815b 100644
+--- a/audiopassthru/src/sndDevices/sndDevicesSet.cpp
++++ b/audiopassthru/src/sndDevices/sndDevicesSet.cpp
+@@ -1,3 +1,4 @@
++// Hikari modification 2026-10-04: isolated headless host integration; see MODIFICATIONS.md.
+ /*
+ FxSound
+ Copyright (C) 2025  FxSound LLC
+@@ -15,6 +16,7 @@ GNU Affero General Public License for more details.
+ You should have received a copy of the GNU Affero General Public License
+ along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ */
++#include "hikari_upstream_hooks.h"
+ #include "codedefs.h"
+ 
+ /* Standard includes */
+@@ -105,6 +107,7 @@ int PT_DECLSPEC sndDevicesSetDeviceType(PT_HANDLE *hp_sndDevices, int i_deviceTy
+ 		break;
+ 
+ 	case SND_DEVICES_DEFAULT :
++		if (!hikariAllowDefaultSwitch(cast_handle->pwszID[device_index_num])) return OKAY;
+ 		hr = CoCreateInstance(__uuidof(CPolicyConfigVistaClient), NULL, CLSCTX_ALL,
+ 			                   __uuidof(IPolicyConfigVista), (LPVOID *)&pPolicyConfig);
+ 		if (SUCCEEDED(hr))
+diff --git a/audiopassthru/src/sndDevices/sndDevicesSetupDevices.cpp b/audiopassthru/src/sndDevices/sndDevicesSetupDevices.cpp
+index 8546bdf..5412225 100644
+--- a/audiopassthru/src/sndDevices/sndDevicesSetupDevices.cpp
++++ b/audiopassthru/src/sndDevices/sndDevicesSetupDevices.cpp
+@@ -1,3 +1,4 @@
++// Hikari modification 2026-10-04: isolated headless host integration; see MODIFICATIONS.md.
+ /*
+ FxSound
+ Copyright (C) 2025  FxSound LLC
+@@ -15,6 +16,7 @@ GNU Affero General Public License for more details.
+ You should have received a copy of the GNU Affero General Public License
+ along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ */
++#include "hikari_upstream_hooks.h"
+ #include "codedefs.h"
+ 
+ /* Standard includes */
+@@ -123,6 +125,12 @@ int PT_DECLSPEC sndDevicesInitialSetupCaptureDevice(PT_HANDLE *hp_sndDevices, in
+ 		SND_DEVICES_SET_STATUS_AND_RETURN_OK(SND_DEVICES_DEVICE_GET_FORMAT_FAILED);
+ 	}
+ 
++	if (!hikariValidateAudioInitialization(pwfx, pwfx))
++	{
++		CoTaskMemFree(pwfx);
++		*ip_status = SND_DEVICES_AUDIO_CLIENT_INIT_FAILED;
++		SND_DEVICES_SET_STATUS_AND_RETURN_OK(SND_DEVICES_AUDIO_CLIENT_INIT_FAILED);
++	}
+ 	cast_handle->wfxCapture = *pwfx;
+ 	CoTaskMemFree(pwfx);
+ 
+@@ -182,8 +190,9 @@ int PT_DECLSPEC sndDevicesFinalSetupCaptureDevice(PT_HANDLE *hp_sndDevices, int
+ 	}
+ 
+ 	// Set capture device up to perform loopback capture. Shared mode allows multiple apps to do capture.
+-	hr = cast_handle->pAudioClientCapture->Initialize(AUDCLNT_SHAREMODE_SHARED, StreamFlags,
+-																	  cast_handle->hnsRequestedDurationCapture,0, pwfx, NULL);
++	hr = hikariValidateAudioInitialization(pwfx, &cast_handle->wfxCapture)
++		? cast_handle->pAudioClientCapture->Initialize(AUDCLNT_SHAREMODE_SHARED, StreamFlags,
++																	  cast_handle->hnsRequestedDurationCapture,0, pwfx, NULL) : AUDCLNT_E_UNSUPPORTED_FORMAT;
+ 	CoTaskMemFree(pwfx);
+ 	if (FAILED(hr))
+ 	{
+@@ -389,6 +398,12 @@ int PT_DECLSPEC sndDevicesInitialSetupPlaybackDevice(PT_HANDLE *hp_sndDevices, i
+ 		SND_DEVICES_SET_STATUS_AND_RETURN_OK(SND_DEVICES_DEVICE_GET_FORMAT_FAILED);
+ 	}
+ 
++	if (!hikariValidateAudioInitialization(pwfx, pwfx))
++	{
++		CoTaskMemFree(pwfx);
++		*ip_status = SND_DEVICES_AUDIO_CLIENT_INIT_FAILED;
++		SND_DEVICES_SET_STATUS_AND_RETURN_OK(SND_DEVICES_AUDIO_CLIENT_INIT_FAILED);
++	}
+ 	cast_handle->wfxPlayback = *pwfx;
+ 	CoTaskMemFree(pwfx);
+ 
+@@ -471,14 +486,16 @@ int PT_DECLSPEC sndDevicesFinalSetupPlaybackDevice(PT_HANDLE *hp_sndDevices, int
+ 		SAFE_RELEASE(cast_handle->pAudioClientPlayback);
+ 		hr = cast_handle->pPlaybackDevice->Activate(cast_handle->IID_IAudioClient, CLSCTX_ALL, NULL, (void**)&cast_handle->pAudioClientPlayback);
+ 		if (SUCCEEDED(hr) && cast_handle->pAudioClientPlayback != NULL)
+-			hr = cast_handle->pAudioClientPlayback->Initialize(AUDCLNT_SHAREMODE_SHARED, StreamFlags, cast_handle->hnsRequestedDurationPlayback, 0, pClosestMatch, NULL);
++			hr = hikariValidateAudioInitialization(pClosestMatch, &cast_handle->wfxPlayback)
++		? cast_handle->pAudioClientPlayback->Initialize(AUDCLNT_SHAREMODE_SHARED, StreamFlags, cast_handle->hnsRequestedDurationPlayback, 0, pClosestMatch, NULL) : AUDCLNT_E_UNSUPPORTED_FORMAT;
+ 		else
+ 			hr = E_FAIL;
+ 	}
+ 	else
+ 	{
+ 		// Format is supported (S_OK) or IsFormatSupported gave no match — try pwfx directly.
+-		hr = cast_handle->pAudioClientPlayback->Initialize(AUDCLNT_SHAREMODE_SHARED, StreamFlags, cast_handle->hnsRequestedDurationPlayback, 0, pwfx, NULL);
++		hr = hikariValidateAudioInitialization(pwfx, &cast_handle->wfxPlayback)
++		? cast_handle->pAudioClientPlayback->Initialize(AUDCLNT_SHAREMODE_SHARED, StreamFlags, cast_handle->hnsRequestedDurationPlayback, 0, pwfx, NULL) : AUDCLNT_E_UNSUPPORTED_FORMAT;
+ 		CoTaskMemFree(pwfx);
+ 		pwfx = NULL;
+ 
+@@ -488,7 +505,8 @@ int PT_DECLSPEC sndDevicesFinalSetupPlaybackDevice(PT_HANDLE *hp_sndDevices, int
+ 			SAFE_RELEASE(cast_handle->pAudioClientPlayback);
+ 			hr = cast_handle->pPlaybackDevice->Activate(cast_handle->IID_IAudioClient, CLSCTX_ALL, NULL, (void**)&cast_handle->pAudioClientPlayback);
+ 			if (SUCCEEDED(hr) && cast_handle->pAudioClientPlayback != NULL)
+-				hr = cast_handle->pAudioClientPlayback->Initialize(AUDCLNT_SHAREMODE_SHARED, StreamFlags, cast_handle->hnsRequestedDurationPlayback, 0, pClosestMatch, NULL);
++				hr = hikariValidateAudioInitialization(pClosestMatch, &cast_handle->wfxPlayback)
++		? cast_handle->pAudioClientPlayback->Initialize(AUDCLNT_SHAREMODE_SHARED, StreamFlags, cast_handle->hnsRequestedDurationPlayback, 0, pClosestMatch, NULL) : AUDCLNT_E_UNSUPPORTED_FORMAT;
+ 			else
+ 				hr = E_FAIL;
+ 		}
+diff --git a/audiopassthru/src/sndDevices/sndDevicesDeviceCallbacks.cpp b/audiopassthru/src/sndDevices/sndDevicesDeviceCallbacks.cpp
+index 7190c26..ae926d3 100644
+--- a/audiopassthru/src/sndDevices/sndDevicesDeviceCallbacks.cpp
++++ b/audiopassthru/src/sndDevices/sndDevicesDeviceCallbacks.cpp
+@@ -1,3 +1,4 @@
++// Hikari modification 2026-10-04: isolated headless host integration; see MODIFICATIONS.md.
+ /*
+ FxSound
+ Copyright (C) 2025  FxSound LLC
+@@ -15,6 +16,7 @@ GNU Affero General Public License for more details.
+ You should have received a copy of the GNU Affero General Public License
+ along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ */
++#include "hikari_upstream_hooks.h"
+ #include "codedefs.h"
+ 
+ /* Standard includes */
+@@ -96,6 +98,7 @@ HRESULT STDMETHODCALLTYPE CsndDevicesMMNotificationClient::OnDefaultDeviceChange
+                           EDataFlow flow, ERole role,
+                           LPCWSTR pwstrDeviceId)
+ {  
++  hikariOnDefaultDeviceChanged(static_cast<int>(flow), static_cast<int>(role), pwstrDeviceId);
+   struct sndDevicesHdlType *cast_handle;
+     
+   cast_handle = (struct sndDevicesHdlType *)g_sndDevicesCallbacks_hdl;
+diff --git a/audiopassthru/src/sndDevices/sndDevicesImplementDeviceRules.cpp b/audiopassthru/src/sndDevices/sndDevicesImplementDeviceRules.cpp
+index 4a93fa9..eba2dd5 100644
+--- a/audiopassthru/src/sndDevices/sndDevicesImplementDeviceRules.cpp
++++ b/audiopassthru/src/sndDevices/sndDevicesImplementDeviceRules.cpp
+@@ -1,3 +1,4 @@
++// Hikari modification 2026-10-04: isolated headless host integration; see MODIFICATIONS.md.
+ /*
+ FxSound
+ Copyright (C) 2025  FxSound LLC
+@@ -15,6 +16,7 @@ GNU Affero General Public License for more details.
+ You should have received a copy of the GNU Affero General Public License
+ along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ */
++#include "hikari_upstream_hooks.h"
+ #include "codedefs.h"
+ 
+ /* Standard includes */
+@@ -288,6 +290,20 @@ int PT_DECLSPEC sndDevicesImplementDeviceRules(PT_HANDLE *hp_sndDevices, int *ip
+ 	}
+ 
+ PlaybackDeviceIsSelected:  // Label to jump to when the playback device num has been determined.
++	{
++		wchar_t preferredOutput[PT_MAX_GENERIC_STRLEN] = {};
++		if (hikariGetPreferredOutput(preferredOutput, PT_MAX_GENERIC_STRLEN))
++		{
++			int preferredIndex = SND_DEVICES_DEVICE_NOT_PRESENT;
++			if (sndDevices_UtilsGetIndexFromID(hp_sndDevices, preferredOutput, &preferredIndex) != OKAY) return NOT_OKAY;
++			if (preferredIndex == SND_DEVICES_DEVICE_NOT_PRESENT || preferredIndex == cast_handle->dfxDeviceNum)
++			{
++				*ip_resultFlag = SND_DEVICES_DEVICE_NOT_PRESENT;
++				SND_DEVICES_SET_STATUS_AND_RETURN_OK(SND_DEVICES_DEVICE_NOT_PRESENT);
++			}
++			cast_handle->playbackDeviceNum = preferredIndex;
++		}
++	}
+ 	if (SND_DEVICES_MONO_BUG_SKIP_MONO_DEVICES)
+ 	{
+ 		// Check if selected playback device is a mono device. If so, try to revert back to the most recent
+diff --git a/audiopassthru/src/reg/regWithKeyname.cpp b/audiopassthru/src/reg/regWithKeyname.cpp
+index c9bd7d9..c1b2806 100644
+--- a/audiopassthru/src/reg/regWithKeyname.cpp
++++ b/audiopassthru/src/reg/regWithKeyname.cpp
+@@ -1,3 +1,4 @@
++// Hikari modification 2026-10-04: isolated headless host integration; see MODIFICATIONS.md.
+ /*
+ FxSound
+ Copyright (C) 2025  FxSound LLC
+@@ -18,6 +19,10 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ #include <stdio.h>
+ #include "wtypes.h"
+ 
++#include "hikari_upstream_hooks.h"
++#define RegCreateKeyExW hikariRegCreateKeyExW
++#define RegOpenKeyExW hikariRegOpenKeyExW
++#define RegDeleteKeyW hikariRegDeleteKeyW
+ #include "codedefs.h"
+ #include "slout.h"
+ #include "pt_defs.h"
+diff --git a/audiopassthru/src/reg/regWithoutKeyname.cpp b/audiopassthru/src/reg/regWithoutKeyname.cpp
+index 3799d38..7f52862 100644
+--- a/audiopassthru/src/reg/regWithoutKeyname.cpp
++++ b/audiopassthru/src/reg/regWithoutKeyname.cpp
+@@ -1,3 +1,4 @@
++// Hikari modification 2026-10-04: isolated headless host integration; see MODIFICATIONS.md.
+ /*
+ FxSound
+ Copyright (C) 2025  FxSound LLC
+@@ -18,6 +19,10 @@ GNU Affero General Public License for more details.
+ You should have received a copy of the GNU Affero General Public License
+ along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ */
++#include "hikari_upstream_hooks.h"
++#define RegCreateKeyExW hikariRegCreateKeyExW
++#define RegOpenKeyExW hikariRegOpenKeyExW
++#define RegDeleteKeyW hikariRegDeleteKeyW
+ #include "codedefs.h"
+ 
+ #include <stdio.h>
+diff --git a/audiopassthru/src/reg/regRecursiveDelete.cpp b/audiopassthru/src/reg/regRecursiveDelete.cpp
+index ffa77cf..9400599 100644
+--- a/audiopassthru/src/reg/regRecursiveDelete.cpp
++++ b/audiopassthru/src/reg/regRecursiveDelete.cpp
+@@ -1,3 +1,4 @@
++// Hikari modification 2026-10-04: isolated headless host integration; see MODIFICATIONS.md.
+ /*
+ FxSound
+ Copyright (C) 2025  FxSound LLC
+@@ -18,6 +19,10 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ #include <stdio.h>
+ #include "wtypes.h"
+ 
++#include "hikari_upstream_hooks.h"
++#define RegCreateKeyExW hikariRegCreateKeyExW
++#define RegOpenKeyExW hikariRegOpenKeyExW
++#define RegDeleteKeyW hikariRegDeleteKeyW
+ #include "codedefs.h"
+ #include "slout.h"
+ #include "pt_defs.h"

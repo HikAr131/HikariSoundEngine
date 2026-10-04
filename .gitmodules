@@ -1,0 +1,3 @@
+[submodule "upstream/fxsound-app"]
+	path = upstream/fxsound-app
+	url = https://github.com/fxsound2/fxsound-app.git

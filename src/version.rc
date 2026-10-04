@@ -1,0 +1,31 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2026 Hikari
+#include <windows.h>
+#pragma code_page(65001)
+1 VERSIONINFO
+FILEVERSION 1,0,0,0
+PRODUCTVERSION 1,0,0,0
+FILEFLAGSMASK 0x3fL
+FILEFLAGS 0
+FILEOS VOS_NT_WINDOWS32
+FILETYPE VFT_APP
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "080404b0"
+    BEGIN
+      VALUE "CompanyName", "Hikari"
+      VALUE "FileDescription", "1U 音效增强"
+      VALUE "FileVersion", "1.0.0"
+      VALUE "InternalName", "HikariSoundEngine"
+      VALUE "LegalCopyright", "Copyright (C) 2026 Hikari; AGPL-3.0-or-later"
+      VALUE "OriginalFilename", "HikariSoundEngine.exe"
+      VALUE "ProductName", "HikariSoundEngine"
+      VALUE "ProductVersion", "1.0.0"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x0804, 1200
+  END
+END
