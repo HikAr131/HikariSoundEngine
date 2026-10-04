@@ -53,7 +53,7 @@ target_link_options(HikariSoundEngine PRIVATE /Brepro /DEBUG:NONE /INCREMENTAL:N
 set_target_properties(HikariSoundEngine PROPERTIES VS_GLOBAL_EnableManagedIncrementalBuild false)
 
 add_executable(HikariDspSelfTest EXCLUDE_FROM_ALL tools/dsp-selftest-main.cpp
-  src/dsp_adapter.cpp src/parameters.cpp src/parametric_eq.cpp src/graphic_eq.cpp tests/dsp_tests.cpp)
+  src/dsp_adapter.cpp src/eq_stage.cpp src/parameters.cpp src/parametric_eq.cpp src/graphic_eq.cpp tests/dsp_tests.cpp)
 target_compile_options(HikariDspSelfTest PRIVATE /Brepro /utf-8 /W4 /permissive- /EHsc)
 target_compile_definitions(HikariDspSelfTest PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 target_include_directories(HikariDspSelfTest PRIVATE src tools

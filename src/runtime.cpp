@@ -269,9 +269,12 @@ public:
             else if (cmd == "devices") { response = devices(); }
             else if (cmd == "apply") {
                 auto p = parseParameters(request.at("params"));
-                mutationStarted = true;
-                if (dsp_) dsp_->apply(p);
-                parameters_ = std::move(p); persist(false);
+                // Identical parameters neither touch the audio path nor rewrite the state file.
+                if (!sameParameters(p, parameters_)) {
+                    mutationStarted = true;
+                    if (dsp_) dsp_->apply(p);
+                    parameters_ = std::move(p); persist(false);
+                }
                 response = Json::object({{"ok", true}, {"applied", parametersJson(parameters_)}});
             } else if (cmd == "set-output") {
                 auto mode = request.at("mode").asString(); std::wstring fixed;
@@ -307,7 +310,8 @@ public:
         if (audio_ && state_ != "yielded" && !paused_) current = parameters_.bypass ? "bypassed" : (processing_ ? "processing" : "starting");
         return Json::object({{"ok", true}, {"running", true}, {"state", current}, {"output", output},
             {"virtual", Json::object({{"present", !virtualId_.empty()}, {"isDefault", defaultEndpoint(eConsole) == virtualId_}})},
-            {"bufferMs", bufferMs_}, {"stats", Json::object({{"underruns", Json()}, {"underrunMeasurementAvailable", false}, {"reinitCount", reinitCount_}, {"uptimeSec", (GetTickCount64() - started_) / 1000}, {"lastReinitReason", lastReinitReason_}})},
+            {"bufferMs", bufferMs_}, {"stats", Json::object({{"underruns", Json()}, {"underrunMeasurementAvailable", false}, {"reinitCount", reinitCount_}, {"uptimeSec", (GetTickCount64() - started_) / 1000}, {"lastReinitReason", lastReinitReason_},
+                {"applyLockMaxUs", dsp_ ? Json((dsp_->stats().applyLockMaxNanoseconds + 999) / 1000) : Json()}})},
             {"conflict", Json::object({{"detected", state_ == "yielded"}, {"lastDefaultName", lastDefaultName_}})},
             {"applied", parametersJson(parameters_)}, {"lastError", lastError_}});
     }
@@ -358,6 +362,7 @@ public:
         if (audio_) {
             audio_->processTimer();
             processing_ = dsp_ && dsp_->audioFrames() > 0 && audio_->isPlaybackDeviceAvailable();
+            if (dsp_) dsp_->collect();
         }
     }
     bool quitting() const { return quitting_; }

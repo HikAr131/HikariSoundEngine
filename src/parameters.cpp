@@ -68,4 +68,41 @@ Parameters clampParameters(Parameters p) {
     return p;
 }
 
+namespace {
+bool samePoints(const std::vector<GraphicBand>& a, const std::vector<GraphicBand>& b) noexcept {
+    return a.size() == b.size() && std::equal(a.begin(), a.end(), b.begin(),
+        [](const GraphicBand& x, const GraphicBand& y) { return x.freq == y.freq && x.gain == y.gain; });
+}
+bool sameFilter(const Filter& x, const Filter& y) noexcept {
+    return x.type == y.type && x.freq == y.freq && x.gain == y.gain && x.q == y.q;
+}
+}
+
+bool sameParameters(const Parameters& a, const Parameters& b) noexcept {
+    const auto& x = a.effects;
+    const auto& y = b.effects;
+    return a.bypass == b.bypass && a.eq.mode == b.eq.mode && a.eq.preamp == b.eq.preamp &&
+        samePoints(a.eq.points, b.eq.points) && a.eq.filters.size() == b.eq.filters.size() &&
+        std::equal(a.eq.filters.begin(), a.eq.filters.end(), b.eq.filters.begin(),
+            [](const Filter& f, const Filter& g) { return f.enabled == g.enabled && sameFilter(f, g); }) &&
+        x.clarity == y.clarity && x.ambience == y.ambience && x.surround == y.surround &&
+        x.dynamicBoost == y.dynamicBoost && x.bass == y.bass && x.treble == y.treble;
+}
+
+bool sameEqualizer(const Parameters& a, const Parameters& b) noexcept {
+    if (a.eq.mode != b.eq.mode || a.effects.treble != b.effects.treble) return false;
+    if (a.eq.mode != "off" && a.eq.preamp != b.eq.preamp) return false;
+    if (a.eq.mode == "graphic") return samePoints(a.eq.points, b.eq.points);
+    if (a.eq.mode != "parametric") return true;
+    auto x = a.eq.filters.begin();
+    auto y = b.eq.filters.begin();
+    for (;;) {
+        while (x != a.eq.filters.end() && !x->enabled) ++x;
+        while (y != b.eq.filters.end() && !y->enabled) ++y;
+        if (x == a.eq.filters.end() || y == b.eq.filters.end())
+            return x == a.eq.filters.end() && y == b.eq.filters.end();
+        if (!sameFilter(*x++, *y++)) return false;
+    }
+}
+
 } // namespace hikari

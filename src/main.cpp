@@ -75,7 +75,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int) {
             test("protocol", runProtocolTests); test("parametric", hikari::runEqTests); test("graphic", hikari::runGraphicTests);
             test("lifecycle", hikari::runLifecycleTests); test("storage", hikari::runStorageTests); test("host", hikari::runHostTests);
             test("audio-format", hikari::runAudioFormatTests); test("audio-identity", hikari::runAudioIdentityTests);
-            test("dsp", hikari::runDspTests); test("measure", hikari::runMeasureTests);
+            test("dsp", hikari::runDspTests); test("transition", hikari::runTransitionTests); test("measure", hikari::runMeasureTests);
             printJson(hikari::Json::object({{"ok", true}, {"selfTest", "passed"}, {"eqVectorPoints", 14336}, {"audioDevicesTouched", false}})); return 0;
         }
         if (command == L"--probe-devices") { printJson(hikari::probeDevices()); return 0; }

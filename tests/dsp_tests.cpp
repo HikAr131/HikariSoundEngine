@@ -136,6 +136,10 @@ void runDspTests() {
         }
         maximum.bypass = true;
         adapter.apply(maximum);
+        // Bypass fades over 20 ms; once settled the output is the untouched input.
+        std::vector<float> settle(2048 * channels, 0.5f);
+        if (adapter.process(settle.data(), 2048, 32, channels, 48000, 32, 0) != 0)
+            throw std::runtime_error("DSP bypass fade failed");
         std::vector<float> bypass(512 * channels, 0.5f);
         const auto original = bypass;
         if (adapter.process(bypass.data(), 512, 32, channels, 48000, 32, 0) != 0 || bypass != original)

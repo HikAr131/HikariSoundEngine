@@ -112,6 +112,26 @@ void ParametricEq::process(float* samples, std::size_t frames) noexcept {
     }
 }
 
+std::size_t ParametricEq::warmupFrames(std::size_t limit) const noexcept {
+    std::size_t frames = graphic_.latencyFrames() ? GraphicEq::kFilterTaps + 2 * GraphicEq::kPartitionFrames : 0;
+    for (const auto& section : sections_) {
+        const auto& c = section.coefficients;
+        const double discriminant = c.a1 * c.a1 - 4 * c.a2;
+        double radius = 0;
+        if (discriminant < 0) radius = std::sqrt(std::max(c.a2, 0.0));
+        else {
+            const double root = std::sqrt(discriminant);
+            radius = std::max(std::abs(-c.a1 + root), std::abs(-c.a1 - root)) / 2;
+        }
+        if (!std::isfinite(radius) || radius >= 1) return limit;
+        if (radius == 0) continue;
+        const double decay = 1.5 * std::log(1e-9) / std::log(radius);
+        if (!(decay < static_cast<double>(limit))) return limit;
+        frames = std::max(frames, static_cast<std::size_t>(std::ceil(decay)));
+    }
+    return std::min(frames, limit);
+}
+
 double ParametricEq::responseDb(const Filter& filter, double frequency, double rate) {
     validateFormat(rate, 2);
     if (!std::isfinite(frequency) || frequency <= 0 || frequency >= rate / 2)

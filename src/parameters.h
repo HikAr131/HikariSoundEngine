@@ -53,5 +53,9 @@ struct Parameters {
 bool isFilterType(const std::string& type) noexcept;
 bool validateParameters(const Parameters& parameters, std::string* error = nullptr);
 Parameters clampParameters(Parameters parameters);
+// Exact value equality of every field, used to make identical applies a no-op.
+bool sameParameters(const Parameters& a, const Parameters& b) noexcept;
+// Equality of what the own preamp/EQ/treble segment renders, ignoring bypass and unused fields.
+bool sameEqualizer(const Parameters& a, const Parameters& b) noexcept;
 
 } // namespace hikari

@@ -14,6 +14,9 @@ class ParametricEq {
 public:
     void configure(const Parameters& parameters, double sampleRate, unsigned channels);
     void process(float* interleaved, std::size_t frames) noexcept;
+    // Input history needed before a fresh instance reproduces a continuously running one:
+    // the full FIR plus one partition, and the 1e-9 decay span of the slowest biquad pole.
+    std::size_t warmupFrames(std::size_t limit) const noexcept;
     static double responseDb(const Filter& filter, double frequency, double sampleRate = 48000);
 
 private:
