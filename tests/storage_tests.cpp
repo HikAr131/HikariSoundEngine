@@ -21,6 +21,11 @@ void runStorageTests() {
         storage.writeState(state);
         check(storage.read("state.json").stringify() == state.stringify());
         check(parametersJson(parseParameters(params)).stringify() == params.stringify());
+        // A held compare-with-original must not survive a restart, including state written by 1.0.0.
+        auto held = p; held.bypass = true;
+        check(persistedParametersJson(held).stringify() == params.stringify());
+        check(parametersJson(held).at("bypass").asBool() && !restoredParameters(parametersJson(held)).bypass);
+        check(parametersJson(restoredParameters(parametersJson(held))).stringify() == params.stringify());
         bool rejected = false;
         try { auto invalid = params; invalid["bypass"] = "false"; parseParameters(invalid); } catch (const JsonError&) { rejected = true; }
         check(rejected);

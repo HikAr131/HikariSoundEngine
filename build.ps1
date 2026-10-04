@@ -104,6 +104,7 @@ try {
         $destinationDocument = if ($document -eq 'THIRD-PARTY.md') { Join-Path $outputRoot 'THIRD-PARTY.txt' } else { Join-Path $outputRoot $document }
         Copy-Item -LiteralPath $sourceDocument -Destination $destinationDocument -Force
     }
+    Invoke-Checked 'node' @('tools/verify-distribution.mjs')
     $hashes = foreach ($file in Get-ChildItem -LiteralPath $outputRoot -File -Recurse | Where-Object { $_.Name -ne 'SHA256SUMS.txt' } | Sort-Object FullName) {
         $relative = $file.FullName.Substring($outputRoot.Length + 1).Replace('\', '/')
         $hashStream = [IO.File]::OpenRead($file.FullName)

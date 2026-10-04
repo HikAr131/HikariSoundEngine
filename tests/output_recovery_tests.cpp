@@ -87,17 +87,29 @@ void runOutputRecoveryTests() {
     const std::string locked = R"j({"code":"OUTPUT_EXCLUSIVE_LOCKED","device":"Speakers (Test)","hresult":"0x8889000A",)j"
         R"j("message":"Output endpoint is in exclusive use by another application","ok":false})j";
     require(recovery.lastError("Speakers (Test)").stringify() == locked, "Exclusive lastError shape mismatch");
-    for (bool bypass : {false, true}) for (bool processing : {false, true})
-        require(visibleEngineState("starting", true, false, recovery.active(), bypass, processing) == "idle-no-device",
+    for (bool bypass : {false, true}) for (bool processing : {false, true}) for (bool ready : {false, true})
+        require(visibleEngineState("starting", true, false, recovery.active(), bypass, processing, ready) == "idle-no-device",
             "Output failure did not report idle-no-device");
-    require(visibleEngineState("starting", true, false, false, false, false) == "starting" &&
-        visibleEngineState("starting", true, false, false, false, true) == "processing" &&
-        visibleEngineState("starting", true, false, false, true, true) == "bypassed" &&
-        visibleEngineState("yielded", true, false, true, false, true) == "yielded" &&
-        visibleEngineState("starting", true, true, true, false, true) == "starting" &&
-        visibleEngineState("idle-no-device", false, false, true, false, false) == "idle-no-device" &&
-        visibleEngineState("conflict-official-fxsound", false, false, false, true, false) == "conflict-official-fxsound",
+    require(visibleEngineState("starting", true, false, false, false, false, false) == "starting" &&
+        visibleEngineState("starting", true, false, false, false, false, true) == "ready" &&
+        visibleEngineState("starting", true, false, false, false, true, false) == "processing" &&
+        visibleEngineState("starting", true, false, false, false, true, true) == "processing" &&
+        visibleEngineState("starting", true, false, false, true, true, true) == "bypassed" &&
+        visibleEngineState("starting", true, false, false, true, false, true) == "bypassed" &&
+        visibleEngineState("yielded", true, false, true, false, true, true) == "yielded" &&
+        visibleEngineState("starting", true, true, true, false, true, true) == "starting" &&
+        visibleEngineState("idle-no-device", false, false, true, false, false, true) == "idle-no-device" &&
+        visibleEngineState("conflict-official-fxsound", false, false, false, true, false, true) == "conflict-official-fxsound",
         "Visible engine state mapping changed");
+    // Ready needs an opened output, a running upstream and the virtual default unless the default is left alone.
+    unsigned readyCombinations = 0;
+    for (bool initialized : {false, true}) for (bool parked : {false, true})
+        for (bool virtualDefault : {false, true}) for (bool noSwitch : {false, true}) {
+            const bool expected = initialized && !parked && (virtualDefault || noSwitch);
+            require(outputReady(initialized, parked, virtualDefault, noSwitch) == expected, "Ready condition mismatch");
+            readyCombinations += expected ? 1 : 0;
+        }
+    require(readyCombinations == 3, "Ready condition truth table changed");
 
     // 60 simulated seconds of an exclusive lock: probes every 2000 ms, never a reinit.
     Times probes;
@@ -129,8 +141,9 @@ void runOutputRecoveryTests() {
     require(recovery.observe(report.hr, now), "Success did not clear the output failure");
     require(!recovery.active() && !recovery.exclusive() && recovery.hresult() == S_OK &&
         recovery.lastError("Speakers (Test)").isNull(), "Success left output failure state");
-    require(visibleEngineState("starting", true, false, recovery.active(), false, false) == "starting" &&
-        visibleEngineState("starting", true, false, recovery.active(), false, true) == "processing", "Success did not restore engine state");
+    require(visibleEngineState("starting", true, false, recovery.active(), false, false, false) == "starting" &&
+        visibleEngineState("starting", true, false, recovery.active(), false, false, true) == "ready" &&
+        visibleEngineState("starting", true, false, recovery.active(), false, true, true) == "processing", "Success did not restore engine state");
     for (const auto until = now + 60000; now < until; now += 100)
         require(recovery.poll(now, false) == Action::none, "Running upstream was retried");
     require(recovery.kicks() == 1 && recovery.probes() == 31, "Recovery counters mismatch");
@@ -219,7 +232,7 @@ void runOutputRecoveryTests() {
         require(!recovery.active() && recovery.lastError("Speakers (Test)").isNull(), "Unreported park created a lastError");
     }
     require(intervals(generic, parkedAt) == Times{2000, 4000, 8000, 16000, 30000, 30000}, "Unreported park backoff mismatch");
-    require(visibleEngineState("starting", true, false, recovery.active(), false, false) == "starting", "Unreported park changed engine state");
+    require(visibleEngineState("starting", true, false, recovery.active(), false, false, false) == "starting", "Unreported park changed engine state");
 
     // A success while upstream stays parked keeps the backoff until upstream runs.
     recovery.reset();

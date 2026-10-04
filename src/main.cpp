@@ -38,6 +38,9 @@ static LONG WINAPI exceptionFilter(EXCEPTION_POINTERS*) {
     return EXCEPTION_EXECUTE_HANDLER;
 }
 int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int) {
+    // The component directory is user-writable: every later DLL load, including the delay-loaded
+    // CFGMGR32 and WTSAPI32 (not KnownDLLs), resolves from System32 only.
+    if (!SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32)) { printJson(hikari::Json::object({{"ok", false}, {"code", "INTERNAL"}, {"message", "DLL search restriction failed"}})); return 1; }
     SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
     SetUnhandledExceptionFilter(exceptionFilter);
     HRESULT com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);

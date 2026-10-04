@@ -47,8 +47,10 @@ target_compile_definitions(HikariSoundEngine PRIVATE UNICODE _UNICODE WIN32_LEAN
 target_include_directories(HikariSoundEngine PRIVATE src tools
   "${UPSTREAM}/dsp/include" "${UPSTREAM}/audiopassthru/include")
 target_link_libraries(HikariSoundEngine PRIVATE fxsound_audio fxsound_dsp
-  ole32 oleaut32 uuid avrt winmm advapi32 propsys shell32 shlwapi user32 wtsapi32 bcrypt cfgmgr32)
+  ole32 oleaut32 uuid avrt winmm advapi32 propsys shell32 shlwapi user32 wtsapi32 bcrypt cfgmgr32 delayimp)
+# Static imports stay KnownDLLs; the rest load lazily after main restricts the DLL search to System32.
 target_link_options(HikariSoundEngine PRIVATE /Brepro /DEBUG:NONE /INCREMENTAL:NO /OPT:REF /OPT:ICF
+  /DELAYLOAD:cfgmgr32.dll /DELAYLOAD:wtsapi32.dll
   "/MANIFESTINPUT:${CMAKE_SOURCE_DIR}/app.manifest")
 set_target_properties(HikariSoundEngine PROPERTIES VS_GLOBAL_EnableManagedIncrementalBuild false)
 

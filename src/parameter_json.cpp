@@ -55,6 +55,16 @@ Parameters parseParameters(const Json& input) {
     if (!validateParameters(p, &error)) throw JsonError(error);
     return clampParameters(std::move(p));
 }
+Json persistedParametersJson(const Parameters& parameters) {
+    auto persisted = parameters;
+    persisted.bypass = false;
+    return parametersJson(persisted);
+}
+Parameters restoredParameters(const Json& input) {
+    auto parameters = parseParameters(input);
+    parameters.bypass = false;
+    return parameters;
+}
 Json parametersJson(const Parameters& p) {
     Json::Array points, filters;
     for (const auto& b : p.eq.points) points.push_back(Json::object({{"freq", b.freq}, {"gain", b.gain}}));

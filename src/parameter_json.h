@@ -6,4 +6,7 @@
 namespace hikari {
 Parameters parseParameters(const Json& input);
 Json parametersJson(const Parameters& parameters);
+// The compare-with-original hold is momentary: bypass is never persisted and never restored.
+Json persistedParametersJson(const Parameters& parameters);
+Parameters restoredParameters(const Json& input);
 }

@@ -52,8 +52,11 @@ private:
     unsigned probes_ = 0, kicks_ = 0;
 };
 
+// Output opened, upstream running and the virtual device taking the default role (unless the
+// default is deliberately left alone): ready to process, whether or not anything is playing.
+bool outputReady(bool outputInitialized, bool upstreamParked, bool virtualIsDefault, bool noDefaultSwitch) noexcept;
 std::string visibleEngineState(const std::string& baseState, bool audioRunning, bool paused,
-    bool outputFailed, bool bypass, bool processing);
+    bool outputFailed, bool bypass, bool processing, bool ready);
 void runOutputRecoveryTests();
 }
 

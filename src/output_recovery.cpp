@@ -84,10 +84,15 @@ Json OutputRecovery::lastError(const std::string& deviceDisplayName) const {
         {"hresult", formatHresult(hresult_)}, {"device", deviceDisplayName}});
 }
 
+bool outputReady(bool outputInitialized, bool upstreamParked, bool virtualIsDefault, bool noDefaultSwitch) noexcept {
+    return outputInitialized && !upstreamParked && (virtualIsDefault || noDefaultSwitch);
+}
 std::string visibleEngineState(const std::string& baseState, bool audioRunning, bool paused,
-    bool outputFailed, bool bypass, bool processing) {
+    bool outputFailed, bool bypass, bool processing, bool ready) {
     if (!audioRunning || baseState == "yielded" || paused) return baseState;
     if (outputFailed) return "idle-no-device";
-    return bypass ? "bypassed" : (processing ? "processing" : "starting");
+    if (bypass) return "bypassed";
+    if (processing) return "processing";
+    return ready ? "ready" : "starting";
 }
 }

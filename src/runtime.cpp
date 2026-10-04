@@ -173,7 +173,7 @@ public:
         auto previous = storage_.read("state.json");
         if (!previous.isNull()) {
             if (!previous.isObject()) throw std::runtime_error("Invalid saved state");
-            if (previous.contains("applied")) parameters_ = parseParameters(previous.at("applied"));
+            if (previous.contains("applied")) parameters_ = restoredParameters(previous.at("applied"));
             if (previous.contains("mode")) mode_ = previous.at("mode").asString();
             if (mode_ != "follow" && mode_ != "fixed") throw std::runtime_error("Invalid saved output mode");
             if (previous.contains("fixedId")) fixedId_ = wide(previous.at("fixedId").asString());
@@ -308,9 +308,12 @@ public:
         Json output = Json();
         auto e = findEndpoint(outputId_);
         if (e) { output = endpointJson(*e); output["mode"] = mode_; }
-        const auto current = visibleEngineState(state_, audio_ != nullptr, paused_, outputRecovery_.active(), parameters_.bypass, processing_);
+        const bool virtualDefault = !virtualId_.empty() && defaultEndpoint(eConsole) == virtualId_;
+        // Ready does not depend on audio playing: silent loopback delivers no frames at all.
+        const bool ready = audio_ && outputReady(outputInitialized_, !audio_->isPlaybackDeviceAvailable(), virtualDefault, options_.noDefaultSwitch);
+        const auto current = visibleEngineState(state_, audio_ != nullptr, paused_, outputRecovery_.active(), parameters_.bypass, processing_, ready);
         return Json::object({{"ok", true}, {"running", true}, {"state", current}, {"output", output},
-            {"virtual", Json::object({{"present", !virtualId_.empty()}, {"isDefault", defaultEndpoint(eConsole) == virtualId_}})},
+            {"virtual", Json::object({{"present", !virtualId_.empty()}, {"isDefault", virtualDefault}})},
             {"bufferMs", bufferMs_}, {"stats", Json::object({{"underruns", Json()}, {"underrunMeasurementAvailable", false}, {"reinitCount", reinitCount_}, {"uptimeSec", (GetTickCount64() - started_) / 1000}, {"lastReinitReason", lastReinitReason_},
                 {"applyLockMaxUs", dsp_ ? Json((dsp_->stats().applyLockMaxNanoseconds + 999) / 1000) : Json()}})},
             {"conflict", Json::object({{"detected", state_ == "yielded"}, {"lastDefaultName", lastDefaultName_}})},
@@ -405,7 +408,7 @@ private:
             {"guardianReady", guardianReady_}, {"recoveryPending", recoveryPending_}, {"noDefaultSwitch", options_.noDefaultSwitch},
             {"state", state_}, {"lastError", lastError_},
             {"restore", restore_}, {"outputVolumes", outputVolumes_}, {"outputId", utf8(outputId_)}, {"mode", mode_}, {"fixedId", utf8(fixedId_)}, {"preferred", preferred},
-            {"bufferMs", bufferMs_}, {"applied", parametersJson(parameters_)}});
+            {"bufferMs", bufferMs_}, {"applied", persistedParametersJson(parameters_)}});
     }
     void persist(bool clean) { storage_.writeState(savedState(clean)); }
     bool restoreOwnedState() noexcept {
@@ -486,7 +489,7 @@ private:
         dsp->prepareFormat(output->sampleRate % 48000 == 0 ? 48000 : 44100, output->channels);
         allowUpstreamSwitch = !options_.noDefaultSwitch;
         // Upstream init already runs a reinit, so its playback reports must count for this session.
-        playbackInitSeen_ = playbackInitializeSequence(); outputRecovery_.reset();
+        playbackInitSeen_ = playbackInitializeSequence(); outputRecovery_.reset(); outputInitialized_ = false;
         auto audio = std::make_unique<AudioPassthru>();
         if (audio->init() != 0) throw std::runtime_error("Upstream initialization failed");
         audio->setDspProcessingModule(dsp->upstream());
@@ -502,7 +505,7 @@ private:
     void stopAudio() {
         allowUpstreamSwitch = false;
         audio_.reset(); dsp_.reset(); processing_ = false;
-        outputRecovery_.reset(); releaseOutputError();
+        outputRecovery_.reset(); releaseOutputError(); outputInitialized_ = false;
         { std::lock_guard<std::mutex> lock(preferredOutputMutex); preferredOutput.clear(); }
     }
     void serviceOutputRecovery() {
@@ -510,6 +513,7 @@ private:
         PlaybackInitializeReport report;
         if (takePlaybackInitializeReport(playbackInitSeen_, report)) {
             playbackInitSeen_ = report.sequence;
+            outputInitialized_ = SUCCEEDED(report.hr);
             if (outputRecovery_.observe(report.hr, now)) {
                 releaseOutputError();
                 if (outputRecovery_.active()) {
@@ -539,7 +543,7 @@ private:
     int bufferMs_ = 40; unsigned reinitCount_ = 0, outputChannels_ = 0, outputRate_ = 0;
     ULONGLONG started_ = GetTickCount64(), lastOfficialCheck_ = 0;
     Json lastError_, outputError_; DefaultConflict conflict_;
-    OutputRecovery outputRecovery_; std::uint64_t playbackInitSeen_ = 0;
+    OutputRecovery outputRecovery_; std::uint64_t playbackInitSeen_ = 0; bool outputInitialized_ = false;
     std::unique_ptr<DspAdapter> dsp_; std::unique_ptr<AudioPassthru> audio_;
     ComPtr<IMMDeviceEnumerator> enumerator_; ComPtr<Notifications> notifications_;
     bool registered_ = false, paused_ = false, quitting_ = false, processing_ = false, shutdown_ = false, clean_ = false;
