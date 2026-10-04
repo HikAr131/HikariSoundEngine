@@ -8,7 +8,7 @@
 
 | 項目 | 1.0.0（已散布） | 1.0.1（本次） |
 | --- | --- | --- |
-| 原始碼 | 公開 tag `v1.0.0` → `a3cd408`，Release 已掛來源 ZIP | （最終建置後填入） |
+| 原始碼 | 公開 tag `v1.0.0` → `a3cd408`，Release 已掛來源 ZIP | tag `v1.0.1`（推送與 Release 需使用者同意；狀態見總結） |
 | `hello.version` | `1.0.0` | `1.0.1`（protocol 仍為 1） |
 | 已簽章 exe | 1U 憑證簽章，SHA256 `8ce4557754303426efdaf69a2344b24fc90ce139435110d20eed59b0a42272cf`；已釘進 1U 的 `COMPONENT_VERSION 1.0.0` 並上傳三個網域 | 尚未簽章；未簽章 exe 雜湊見下方「最終產物」，簽章後要重算 |
 | 另存位置 | `.scratch/v1.0.0-signed-dist/`（gitignore 範圍內，含簽章 exe、`sign.log` 與當時的 ZIP） | `dist/` |
@@ -31,7 +31,7 @@
 
 - **相同參數的 apply 不再重建**：與目前套用值逐欄完全相同（夾限之後比）時，helper 直接回 `ok` 與 `applied`，不建濾波器、不碰音訊、不重寫 `state.json`。1U 重送同一組參數是安全的。
 - **淡化時長 20 ms**：EQ（preamp／圖形／參數／高音）改變時，新濾波器先用最近的輸入預熱，再與舊的交叉淡化 20 ms；連續操作時新目標排隊、只留最新的，改回原參數會從對稱位置折返。`bypass`（「对比原声」）也以 20 ms 淡入淡出；淡化完成後輸出與輸入逐位元組相同，上游處理鏈在背後照常運算。
-- **上游 setter 只在值有變時呼叫**。最長持鎖時間：只改 EQ 0.3 µs；改一個效果約 107 µs；五個效果一次全改約 531 µs（上游 setter 會寫登錄檔，必須與音訊處理互斥）。
+- **上游 setter 只在值有變時呼叫**。最長持鎖時間：只改 EQ 0.5 µs；改一個效果約 102 µs；五個效果一次全改約 543 µs（上游 setter 會寫登錄檔，必須與音訊處理互斥）。新濾波器的追趕一律在鎖外，鎖只用來確認它已追上。
 - 上游五個效果自己在數值改變時會不會咔嗒，屬於上游行為，列在 `vm-validation.md` 第三輪記錄。
 - **DLL 載入**：靜態匯入只剩 KnownDLL（ADVAPI32、KERNEL32、ole32、SHELL32、USER32），CFGMGR32 與 WTSAPI32 改為延遲載入，`wWinMain` 第一件事是 `SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32)`。元件目錄旁被放進同名 DLL 也不會被載入。每次建置都由 `tools/verify-distribution.mjs` 檢查。
 
@@ -41,7 +41,14 @@
 
 ### 最終產物
 
-（最終建置後填入）
+| 檔案 | 大小 | SHA256 |
+| --- | ---: | --- |
+| `dist/HikariSoundEngine.exe`（未簽章） | 1,285,120 | `71af520fb7315fa82ecf7ed6ff5404074d98b9440a0b5be6e1bdb4d7c66c15bc` |
+| `dist/drivers/fxvad.sys` | 326,656 | `425629b6309000013e8cd1a9b827bee365d21c9f743873aadd0c3bc96a999d2a` |
+| `dist/drivers/fxvad.inf` | 5,170 | `b7049bfce3bd60ede027518785d3087c48f546e0ff082af634eb9d819c81d273` |
+| `dist/drivers/fxvadntamd64.cat` | 10,590 | `25c8dae186155d20f74feedefb4f84161e4215925b8fd0c898f68f3e50ebcd7d` |
+
+兩次乾淨建置逐位元組相同。來源 ZIP 與其他檔案的雜湊以 `dist/SHA256SUMS.txt` 為準。簽章由 1U 倉庫的 `scripts/sign-sound-engine-helper.cmd` 處理：簽完 `dist/HikariSoundEngine.exe` 的大小與雜湊都會變，要重算 `SHA256SUMS.txt` 再釘進 1U 的元件清單；驅動三檔絕不簽、絕不改。
 
 ## 協定與接線（沿用 1.0.0）
 
