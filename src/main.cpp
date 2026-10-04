@@ -18,6 +18,7 @@
 #include "storage.h"
 #include "measure.h"
 #include "parameter_json.h"
+#include "version.h"
 #include <fstream>
 #include <filesystem>
 #include <string>
@@ -68,7 +69,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int) {
             else if (command == L"measure" && args[i] == L"--rate") { auto v = value(); std::size_t used; auto n = std::stoul(v, &used); if (used != v.size() || n > 192000) throw std::invalid_argument("Invalid measurement rate"); measureRate = static_cast<unsigned>(n); }
             else throw std::invalid_argument("Unknown argument");
         }
-        if (command == L"--version") { printJson(hikari::Json::object({{"ok", true}, {"name", "HikariSoundEngine"}, {"version", "1.0.0"}, {"protocol", 1}})); return 0; }
+        if (command == L"--version") { printJson(hikari::Json::object({{"ok", true}, {"name", "HikariSoundEngine"}, {"version", HIKARI_VERSION_STRING}, {"protocol", HIKARI_PROTOCOL_VERSION}})); return 0; }
         if (command == L"--test-child") { Sleep(100); return 7; }
         if (command == L"--self-test") {
             auto test = [](const char* name, void (*run)()) { printJson(hikari::Json::object({{"test", name}, {"state", "running"}})); run(); };

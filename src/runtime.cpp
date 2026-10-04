@@ -11,6 +11,7 @@
 #include "parameter_json.h"
 #include "pipe_server.h"
 #include "dsp_adapter.h"
+#include "version.h"
 #include "AudioPassthru.h"
 #include <windows.h>
 #include <wtsapi32.h>
@@ -264,7 +265,7 @@ public:
         };
         Json response;
         try {
-            if (cmd == "hello") response = Json::object({{"ok", true}, {"name", "HikariSoundEngine"}, {"version", "1.0.0"}, {"protocol", 1}, {"pid", GetCurrentProcessId()}});
+            if (cmd == "hello") response = Json::object({{"ok", true}, {"name", "HikariSoundEngine"}, {"version", HIKARI_VERSION_STRING}, {"protocol", HIKARI_PROTOCOL_VERSION}, {"pid", GetCurrentProcessId()}});
             else if (cmd == "status" || cmd == "subscribe") { response = status(); }
             else if (cmd == "devices") { response = devices(); }
             else if (cmd == "apply") {
