@@ -8,6 +8,7 @@
 bool hikariAllowDefaultSwitch(const wchar_t*) { return false; }
 void hikariOnDefaultDeviceChanged(int, int, const wchar_t*) {}
 bool hikariGetPreferredOutput(wchar_t*, int) { return false; }
+void hikariOnPlaybackInitializeResult(HRESULT) noexcept {}
 extern "C" void hikariLogUpstreamError(const wchar_t* message) {
     if (message) std::fwprintf(stderr,L"%s\n",message);
 }

@@ -24,5 +24,6 @@ std::vector<Endpoint> enumerateEndpoints();
 std::wstring defaultEndpoint(unsigned role);
 bool setDefaultEndpoint(const std::wstring& id, unsigned role);
 bool restoreVolume(const std::wstring& id, float volume, bool muted);
+long probeSharedOutputInitialize(const std::wstring& endpointId) noexcept;
 bool officialFxSoundRunning();
 }

@@ -69,7 +69,10 @@ modify('audiopassthru/src/sndDevices/sndDevicesSetupDevices.cpp', text => {
         `\t\t? ${client}->Initialize(${args}) : AUDCLNT_E_UNSUPPORTED_FORMAT;`;
     });
   if (calls !== 4) throw new Error(`Expected four WASAPI Initialize sites, found ${calls}`);
-  return text;
+  const playbackRelease = 'CoTaskMemFree(pClosestMatch);';
+  const releases = text.split(playbackRelease).length - 1;
+  if (releases !== 1) throw new Error(`Expected one playback closest-match release, found ${releases}`);
+  return text.replace(playbackRelease, `${playbackRelease}\n\thikariOnPlaybackInitializeResult(hr);`);
 });
 modify('audiopassthru/src/sndDevices/sndDevicesDeviceCallbacks.cpp', text => {
   text = replaceOne(text, '#include "codedefs.h"', '#include "hikari_upstream_hooks.h"\n#include "codedefs.h"');

@@ -264,7 +264,7 @@ index 95cf0d0..2e5815b 100644
  			                   __uuidof(IPolicyConfigVista), (LPVOID *)&pPolicyConfig);
  		if (SUCCEEDED(hr))
 diff --git a/audiopassthru/src/sndDevices/sndDevicesSetupDevices.cpp b/audiopassthru/src/sndDevices/sndDevicesSetupDevices.cpp
-index 8546bdf..5412225 100644
+index 8546bdf..389dacf 100644
 --- a/audiopassthru/src/sndDevices/sndDevicesSetupDevices.cpp
 +++ b/audiopassthru/src/sndDevices/sndDevicesSetupDevices.cpp
 @@ -1,3 +1,4 @@
@@ -337,7 +337,7 @@ index 8546bdf..5412225 100644
  		CoTaskMemFree(pwfx);
  		pwfx = NULL;
  
-@@ -488,7 +505,8 @@ int PT_DECLSPEC sndDevicesFinalSetupPlaybackDevice(PT_HANDLE *hp_sndDevices, int
+@@ -488,12 +505,14 @@ int PT_DECLSPEC sndDevicesFinalSetupPlaybackDevice(PT_HANDLE *hp_sndDevices, int
  			SAFE_RELEASE(cast_handle->pAudioClientPlayback);
  			hr = cast_handle->pPlaybackDevice->Activate(cast_handle->IID_IAudioClient, CLSCTX_ALL, NULL, (void**)&cast_handle->pAudioClientPlayback);
  			if (SUCCEEDED(hr) && cast_handle->pAudioClientPlayback != NULL)
@@ -347,6 +347,12 @@ index 8546bdf..5412225 100644
  			else
  				hr = E_FAIL;
  		}
+ 	}
+ 	CoTaskMemFree(pClosestMatch);
++	hikariOnPlaybackInitializeResult(hr);
+ 
+ 	if (FAILED(hr))
+ 	{
 diff --git a/audiopassthru/src/sndDevices/sndDevicesDeviceCallbacks.cpp b/audiopassthru/src/sndDevices/sndDevicesDeviceCallbacks.cpp
 index 7190c26..ae926d3 100644
 --- a/audiopassthru/src/sndDevices/sndDevicesDeviceCallbacks.cpp

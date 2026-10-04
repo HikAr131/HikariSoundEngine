@@ -17,6 +17,7 @@
 #include "dsp_adapter.h"
 #include "storage.h"
 #include "measure.h"
+#include "output_recovery.h"
 #include "parameter_json.h"
 #include "version.h"
 #include <fstream>
@@ -76,6 +77,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int) {
             test("protocol", runProtocolTests); test("parametric", hikari::runEqTests); test("graphic", hikari::runGraphicTests);
             test("lifecycle", hikari::runLifecycleTests); test("storage", hikari::runStorageTests); test("host", hikari::runHostTests);
             test("audio-format", hikari::runAudioFormatTests); test("audio-identity", hikari::runAudioIdentityTests);
+            test("output-recovery", hikari::runOutputRecoveryTests);
             test("dsp", hikari::runDspTests); test("transition", hikari::runTransitionTests); test("measure", hikari::runMeasureTests);
             printJson(hikari::Json::object({{"ok", true}, {"selfTest", "passed"}, {"eqVectorPoints", 14336}, {"audioDevicesTouched", false}})); return 0;
         }

@@ -15,13 +15,44 @@ if(!device.includes('if (!hikariAllowDefaultSwitch(cast_handle->pwszID[device_in
 const stripComments = value => value.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, '');
 const setup = stripComments(fs.readFileSync(path.join(root, 'build/upstream/audiopassthru/src/sndDevices/sndDevicesSetupDevices.cpp'), 'utf8'));
 const initializations = [...setup.matchAll(/cast_handle->pAudioClient(Capture|Playback)->Initialize\(/g)];
-const guarded = [...setup.matchAll(/hr\s*=\s*hikariValidateAudioInitialization\((pwfx|pClosestMatch),\s*&cast_handle->wfx(Capture|Playback)\)\s*\?\s*cast_handle->pAudioClient(Capture|Playback)->Initialize\(([\s\S]*?)\)\s*:\s*AUDCLNT_E_UNSUPPORTED_FORMAT\s*;/g)];
+const guardPattern = /hr\s*=\s*hikariValidateAudioInitialization\((pwfx|pClosestMatch),\s*&cast_handle->wfx(Capture|Playback)\)\s*\?\s*cast_handle->pAudioClient(Capture|Playback)->Initialize\(([\s\S]*?)\)\s*:\s*AUDCLNT_E_UNSUPPORTED_FORMAT\s*;/g;
+const guarded = [...setup.matchAll(guardPattern)];
 if (initializations.length !== 4 || guarded.length !== initializations.length ||
     guarded.filter(match => match[2] === 'Capture').length !== 1 ||
     guarded.filter(match => match[1] === 'pClosestMatch').length !== 2 ||
     guarded.some(match => match[2] !== match[3] ||
       !new RegExp(`,\\s*${match[1]},\\s*NULL\\s*$`).test(match[4])))
   throw new Error('Every WASAPI Initialize call must validate its actual format against the corresponding cached format');
+const functionBody = (source, name) => {
+  const definitions = [...source.matchAll(new RegExp(`\\bint\\s+PT_DECLSPEC\\s+${name}\\s*\\(`, 'g'))];
+  if (definitions.length !== 1) throw new Error(`Expected one definition of ${name}`);
+  const open = source.indexOf('{', definitions[0].index);
+  for (let index = open, depth = 0; open >= 0 && index < source.length; ++index) {
+    const char = source[index];
+    if (char === '"' || char === "'") {
+      for (++index; index < source.length && source[index] !== char; ++index) if (source[index] === '\\') ++index;
+    } else if (char === '{') ++depth;
+    else if (char === '}' && --depth === 0) return {start: open, end: index + 1};
+  }
+  throw new Error(`Unterminated definition of ${name}`);
+};
+const requireHook = (condition, message) => { if (!condition) throw new Error(`Playback Initialize result hook ${message}`); };
+const playback = functionBody(setup, 'sndDevicesFinalSetupPlaybackDevice');
+const hookMentions = [...setup.matchAll(/\bhikariOnPlaybackInitializeResult\b/g)];
+const hookCalls = [...setup.matchAll(/\bhikariOnPlaybackInitializeResult\(hr\);/g)];
+requireHook(hookMentions.length === 1 && hookCalls.length === 1, 'must appear exactly once, as hikariOnPlaybackInitializeResult(hr);');
+const hookStart = hookCalls[0].index, hookEnd = hookStart + hookCalls[0][0].length;
+requireHook(hookStart > playback.start && hookEnd < playback.end, 'must be inside sndDevicesFinalSetupPlaybackDevice');
+const playbackGuards = [...setup.slice(playback.start, playback.end).matchAll(guardPattern)];
+requireHook(playbackGuards.length === 3 && playbackGuards.every(match => match[2] === 'Playback') &&
+  playback.start + playbackGuards[2].index + playbackGuards[2][0].length <= hookStart,
+  'must follow the last guarded Playback Initialize');
+const releases = [...setup.matchAll(/\bCoTaskMemFree\(pClosestMatch\);/g)];
+requireHook(releases.length === 1 && /^\s*$/.test(setup.slice(releases[0].index + releases[0][0].length, hookStart)),
+  'must directly follow the single CoTaskMemFree(pClosestMatch);');
+const failures = [...setup.matchAll(/if\s*\(\s*FAILED\(hr\)\s*\)\s*\{\s*if\s*\(\s*hr\s*==\s*AUDCLNT_E_DEVICE_IN_USE\s*\|\|\s*hr\s*==\s*AUDCLNT_E_UNSUPPORTED_FORMAT\s*\)\s*cast_handle->playbackDeviceIsUnavailable\s*=\s*TRUE\s*;/g)];
+requireHook(failures.length === 1 && failures[0].index < playback.end && /^\s*$/.test(setup.slice(hookEnd, failures[0].index)),
+  'must directly precede the failure branch that marks the playback device unavailable');
 const format = stripComments(fs.readFileSync(path.join(root, 'src/audio_format.cpp'), 'utf8'));
 for (const [channels, masks] of [[2, ['0x3']], [4, ['0x33']], [6, ['0x3f', '0x60f']], [8, ['0x63f']]]) {
   const expected = `case ${channels}: return ${masks.map(mask => `mask == ${mask}`).join(' || ')};`;

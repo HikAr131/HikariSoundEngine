@@ -5,6 +5,7 @@
 #endif
 #include "runtime.h"
 #include "audio_platform.h"
+#include "output_recovery.h"
 #include "security.h"
 #include "storage.h"
 #include "lifecycle.h"
@@ -307,8 +308,7 @@ public:
         Json output = Json();
         auto e = findEndpoint(outputId_);
         if (e) { output = endpointJson(*e); output["mode"] = mode_; }
-        std::string current = state_;
-        if (audio_ && state_ != "yielded" && !paused_) current = parameters_.bypass ? "bypassed" : (processing_ ? "processing" : "starting");
+        const auto current = visibleEngineState(state_, audio_ != nullptr, paused_, outputRecovery_.active(), parameters_.bypass, processing_);
         return Json::object({{"ok", true}, {"running", true}, {"state", current}, {"output", output},
             {"virtual", Json::object({{"present", !virtualId_.empty()}, {"isDefault", defaultEndpoint(eConsole) == virtualId_}})},
             {"bufferMs", bufferMs_}, {"stats", Json::object({{"underruns", Json()}, {"underrunMeasurementAvailable", false}, {"reinitCount", reinitCount_}, {"uptimeSec", (GetTickCount64() - started_) / 1000}, {"lastReinitReason", lastReinitReason_},
@@ -362,6 +362,7 @@ public:
         }
         if (audio_) {
             audio_->processTimer();
+            serviceOutputRecovery();
             processing_ = dsp_ && dsp_->audioFrames() > 0 && audio_->isPlaybackDeviceAvailable();
             if (dsp_) dsp_->collect();
         }
@@ -484,6 +485,8 @@ private:
         auto dsp = std::make_unique<DspAdapter>(); dsp->apply(parameters_);
         dsp->prepareFormat(output->sampleRate % 48000 == 0 ? 48000 : 44100, output->channels);
         allowUpstreamSwitch = !options_.noDefaultSwitch;
+        // Upstream init already runs a reinit, so its playback reports must count for this session.
+        playbackInitSeen_ = playbackInitializeSequence(); outputRecovery_.reset();
         auto audio = std::make_unique<AudioPassthru>();
         if (audio->init() != 0) throw std::runtime_error("Upstream initialization failed");
         audio->setDspProcessingModule(dsp->upstream());
@@ -499,7 +502,35 @@ private:
     void stopAudio() {
         allowUpstreamSwitch = false;
         audio_.reset(); dsp_.reset(); processing_ = false;
+        outputRecovery_.reset(); releaseOutputError();
         { std::lock_guard<std::mutex> lock(preferredOutputMutex); preferredOutput.clear(); }
+    }
+    void serviceOutputRecovery() {
+        const std::uint64_t now = GetTickCount64();
+        PlaybackInitializeReport report;
+        if (takePlaybackInitializeReport(playbackInitSeen_, report)) {
+            playbackInitSeen_ = report.sequence;
+            if (outputRecovery_.observe(report.hr, now)) {
+                releaseOutputError();
+                if (outputRecovery_.active()) {
+                    const auto output = findEndpoint(outputId_);
+                    outputError_ = outputRecovery_.lastError(output ? output->name : std::string());
+                    lastError_ = outputError_;
+                }
+                const auto kind = classifyPlaybackInitialize(report.hr);
+                storage_.log(kind.failed ? "Output failure " + std::string(kind.code) + " " + formatHresult(report.hr)
+                    : "Output failure cleared " + formatHresult(report.hr));
+                persist(false);
+            }
+        }
+        // Act only on a parked upstream; a lock is probed directly because every upstream reinit rewrites the output volume.
+        auto action = outputRecovery_.poll(now, !audio_->isPlaybackDeviceAvailable());
+        if (action == OutputRecovery::Action::probe) action = outputRecovery_.probeResult(probeSharedOutputInitialize(outputId_), now);
+        if (action == OutputRecovery::Action::kick) audio_->setBufferLength(bufferMs_);
+    }
+    void releaseOutputError() {
+        if (!outputError_.isNull() && lastError_.stringify() == outputError_.stringify()) lastError_ = Json();
+        outputError_ = Json();
     }
     Json devices() const { Json::Array list; for (const auto& e : enumerateEndpoints()) list.push_back(endpointJson(e)); return Json::object({{"ok", true}, {"devices", list}}); }
     RunOptions options_; Storage storage_; Parameters parameters_;
@@ -507,7 +538,8 @@ private:
     std::wstring virtualId_, outputId_, fixedId_; std::string mode_ = "follow", state_ = "starting", instance_, lastDefaultName_, lastReinitReason_ = "startup";
     int bufferMs_ = 40; unsigned reinitCount_ = 0, outputChannels_ = 0, outputRate_ = 0;
     ULONGLONG started_ = GetTickCount64(), lastOfficialCheck_ = 0;
-    Json lastError_; DefaultConflict conflict_;
+    Json lastError_, outputError_; DefaultConflict conflict_;
+    OutputRecovery outputRecovery_; std::uint64_t playbackInitSeen_ = 0;
     std::unique_ptr<DspAdapter> dsp_; std::unique_ptr<AudioPassthru> audio_;
     ComPtr<IMMDeviceEnumerator> enumerator_; ComPtr<Notifications> notifications_;
     bool registered_ = false, paused_ = false, quitting_ = false, processing_ = false, shutdown_ = false, clean_ = false;

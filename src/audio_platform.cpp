@@ -133,6 +133,26 @@ bool restoreVolume(const std::wstring& id, float value, bool muted) {
     if (FAILED(d->Activate(__uuidof(IAudioEndpointVolume), CLSCTX_ALL, nullptr, reinterpret_cast<void**>(volume.GetAddressOf())))) return false;
     return SUCCEEDED(volume->SetMasterVolumeLevelScalar(std::clamp(value, 0.0f, 1.0f), nullptr)) && SUCCEEDED(volume->SetMute(muted, nullptr));
 }
+long probeSharedOutputInitialize(const std::wstring& endpointId) noexcept {
+    if (endpointId.empty()) return E_INVALIDARG;
+    ComPtr<IMMDeviceEnumerator> devices;
+    HRESULT hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, IID_PPV_ARGS(&devices));
+    if (FAILED(hr)) return hr;
+    ComPtr<IMMDevice> device;
+    hr = devices->GetDevice(endpointId.c_str(), &device);
+    if (FAILED(hr)) return hr;
+    ComPtr<IAudioClient> client;
+    hr = device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, reinterpret_cast<void**>(client.GetAddressOf()));
+    if (FAILED(hr)) return hr;
+    WAVEFORMATEX* mix = nullptr;
+    hr = client->GetMixFormat(&mix);
+    if (FAILED(hr)) return hr;
+    if (!mix) return E_POINTER;
+    // Shared-mode Initialize only reports whether the endpoint can be opened; the stream is never started.
+    hr = client->Initialize(AUDCLNT_SHAREMODE_SHARED, AUDCLNT_SESSIONFLAGS_DISPLAY_HIDE, 200000, 0, mix, nullptr);
+    CoTaskMemFree(mix);
+    return hr;
+}
 bool officialFxSoundRunning() {
     HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if (snapshot == INVALID_HANDLE_VALUE) throw std::runtime_error("Process enumeration failed");

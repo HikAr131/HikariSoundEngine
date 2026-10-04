@@ -28,6 +28,21 @@ for (let site = 0; site < 4; ++site) mutate(setupPath, value => {
   return value.replace(/hikariValidateAudioInitialization\((pwfx|pClosestMatch), &cast_handle->wfx(Capture|Playback)\)/g,
     match => index++ === site ? 'true' : match);
 });
+const hook = 'hikariOnPlaybackInitializeResult(hr);';
+const moveHook = (value, anchor) => {
+  const removed = value.replace(/\r?\n\thikariOnPlaybackInitializeResult\(hr\);/, '');
+  if (removed === value || removed.split(anchor).length !== 2) throw new Error(`Hook relocation anchor missing: ${anchor}`);
+  return removed.replace(anchor, `${hook}\n\t${anchor}`);
+};
+mutate(setupPath, value => value.replace(hook, ''));
+mutate(setupPath, value => value.replace(hook, 'hikariOnPlaybackInitResult(hr);'));
+mutate(setupPath, value => value.replace(hook, 'hikariOnPlaybackInitializeResult(S_OK);'));
+mutate(setupPath, value => value.replace(hook, `${hook}\n\t${hook}`));
+mutate(setupPath, value => value.replace(hook, `if (false) ${hook}`));
+mutate(setupPath, value => value.replace(hook, `${hook}\n\thr = S_OK;`));
+mutate(setupPath, value => moveHook(value, 'if (cast_handle->pAudioClientPlayback->IsFormatSupported('));
+mutate(setupPath, value => moveHook(value, '// Get the actual size of the allocated buffer in sample sets'));
+mutate(setupPath, value => moveHook(value, '// Get the size of the allocated buffer, this is in sample sets'));
 const formatPath = path.join(root, 'src/audio_format.cpp');
 for (const mask of ['0x3', '0x33', '0x3f', '0x60f', '0x63f']) mutate(formatPath,
   value => value.replace(new RegExp(`mask == ${mask}(?![0-9a-f])`), 'mask == 0'));
