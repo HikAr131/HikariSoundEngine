@@ -207,11 +207,11 @@ std::size_t chainDelay() {
 }
 
 struct Totals {
-    std::uint64_t lockCycles = 0, lockNanoseconds = 0, lockedCatchUps = 0;
+    std::uint64_t lockCycles = 0, lockNanoseconds = 0, syncRetries = 0;
     void add(const DspAdapter::Stats& stats) {
         lockCycles = std::max(lockCycles, stats.applyLockMaxCycles);
         lockNanoseconds = std::max(lockNanoseconds, stats.applyLockMaxNanoseconds);
-        lockedCatchUps += stats.lockedCatchUps;
+        syncRetries += stats.syncRetries;
     }
 };
 
@@ -347,6 +347,55 @@ void testStateMachine(const Json& fixture, const std::vector<double>& fade) {
         "EQ transition state machine deviates from the ideal mix");
 }
 
+// The retry path outside the lock: a warmed chain that fell behind catches up from the history and
+// still lands exactly; one that fell out of the history reports it so the adapter rebuilds it.
+void testCatchUp(const Json& fixture, const std::vector<double>& fade) {
+    const std::size_t total = fade.size() - 1;
+    const auto first = graphicPreset(fixture, "1UBassBoost");
+    const auto second = graphicPreset(fixture, "1UVoice");
+    const auto input = makeSignal("noise");
+    const std::size_t behind = 1000, installAt = kSwitch + behind;
+    EqStage stage;
+    auto resources = EqStage::allocate(kRate, kChannels);
+    std::vector<std::unique_ptr<EqChain>> released;
+    stage.reset(resources, EqStage::build(first, kRate, kChannels), released);
+    std::vector<float> scratch;
+    auto output = input;
+    std::unique_ptr<EqChain> chain;
+    for (std::size_t start = 0; start < kFrames;) {
+        if (start == kSwitch) {
+            chain = EqStage::build(second, kRate, kChannels);
+            require(stage.warm(*chain, scratch) && stage.synced(*chain), "Catch-up fixture warm-up failed");
+        }
+        if (start == installAt) {
+            require(!stage.synced(*chain), "Catch-up fixture did not fall behind");
+            require(stage.catchUp(*chain, scratch) && stage.synced(*chain), "Chain did not catch up from the history");
+            std::unique_ptr<EqChain> dropped;
+            stage.install(std::move(chain), dropped);
+        }
+        std::size_t count = std::min(kBlock, kFrames - start);
+        if (start < kSwitch) count = std::min(count, kSwitch - start);
+        else if (start < installAt) count = std::min(count, installAt - start);
+        stage.process(output.data() + start * kChannels, count);
+        stage.takeRetired(released);
+        released.clear();
+        start += count;
+    }
+    const double error = maximumError(output, mixIdeal(runSteady(input, first), runSteady(input, second), rampPositions(installAt, total), fade, 0));
+    EqStage expired;
+    auto expiredResources = EqStage::allocate(kRate, kChannels);
+    expired.reset(expiredResources, EqStage::build(first, kRate, kChannels), released);
+    auto stale = EqStage::build(second, kRate, kChannels);
+    require(expired.warm(*stale, scratch), "Expired fixture warm-up failed");
+    std::vector<float> filler(kBlock * kChannels, 0.01f);
+    for (std::size_t written = 0; written <= InputHistory::kCapacityFrames; written += kBlock) expired.process(filler.data(), kBlock);
+    const bool expiredRejected = !expired.catchUp(*stale, scratch) && !expired.synced(*stale);
+    std::cout << "Transition catch-up: " << behind << " frames behind max=" << error
+              << ", fell out of history rejected=" << (expiredRejected ? "yes" : "no") << std::endl;
+    require(error <= kStageLimit, "Caught-up chain deviates from the ideal mix");
+    require(expiredRejected, "A chain that fell out of the history was not reported");
+}
+
 void testConcurrent(const Json& fixture, const std::vector<double>& fade, std::size_t delay, Totals& totals) {
     const std::size_t total = fade.size() - 1;
     const Parameters presets[] = {graphicPreset(fixture, "1UBassBoost"), graphicPreset(fixture, "1UVoice")};
@@ -391,7 +440,7 @@ void testConcurrent(const Json& fixture, const std::vector<double>& fade, std::s
     }
     const double error = maximumError(output, expected);
     std::cout << "Transition concurrent: fades=" << records.size() << " max=" << error
-              << " lockedCatchUps=" << adapter.stats().lockedCatchUps << std::endl;
+              << " syncRetries=" << adapter.stats().syncRetries << std::endl;
     require(error <= kChainLimit, "Concurrent EQ crossfades deviate from the ideal mix");
 }
 
@@ -514,13 +563,14 @@ void runTransitionTests() {
     testBypass(fixture, fade, bypassTotals);
     testIdentical(fixture);
     testStateMachine(fixture, fade);
+    testCatchUp(fixture, fade);
     testConcurrent(fixture, fade, delay, totals);
     testEffectsLock(fixture, bypassTotals);
     testFormats(fixture);
     std::cout << "Transition summary: fade=20 ms (960 frames at 48 kHz), chain delay=" << delay
               << " frames, EQ apply lock max=" << totals.lockNanoseconds / 1000.0 << " us / " << totals.lockCycles
               << " cycles, bypass/effect apply lock max=" << bypassTotals.lockNanoseconds / 1000.0
-              << " us, locked catch-ups=" << totals.lockedCatchUps << std::endl;
+              << " us, sync retries=" << totals.syncRetries << std::endl;
     require(totals.lockCycles <= kLockCycleLimit, "Heavy work ran while holding the audio lock");
 }
 } // namespace hikari

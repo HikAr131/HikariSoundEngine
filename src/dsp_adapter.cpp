@@ -8,6 +8,7 @@
 #include <map>
 #include <stdexcept>
 #include <string>
+#include <thread>
 
 namespace {
 std::mutex adaptersMutex;
@@ -66,7 +67,9 @@ int hikariProcessAudio(DfxDsp* dsp, float* buffer, int frames, int bits,
 
 namespace hikari {
 namespace {
-constexpr unsigned kMaxSyncAttempts = 16;
+// Only a configuration thread starved below real-time speed can miss this; the engine then
+// reports the apply as failed instead of computing inside the audio lock.
+constexpr ULONGLONG kSyncTimeoutMs = 5000;
 void raiseMaximum(std::atomic<std::uint64_t>& maximum, std::uint64_t value) noexcept {
     auto current = maximum.load();
     while (value > current && !maximum.compare_exchange_weak(current, value)) {}
@@ -158,25 +161,28 @@ void DspAdapter::apply(const Parameters& parameters) {
     auto chain = EqStage::build(next, sampleRate, channels);
     ++chainsBuilt_;
     bool current = eq_.warm(*chain, scratch);
-    for (unsigned attempt = 1;; ++attempt) {
-        if (!current) {
-            chain = EqStage::build(next, sampleRate, channels);
-            ++chainsBuilt_;
-            current = eq_.warm(*chain, scratch);
-        }
-        {
+    // Catching up never happens under the audio lock: the lock only confirms the chain is level
+    // with the history. A chain that fell out of the readable history is rebuilt and warmed again.
+    const auto deadline = GetTickCount64() + kSyncTimeoutMs;
+    for (;;) {
+        if (current) {
             TimedLock lock(*this);
-            if (!eq_.synced(*chain) && attempt >= kMaxSyncAttempts) {
-                eq_.catchUpLocked(*chain, scratch);
-                ++lockedCatchUps_;
-            }
             if (eq_.synced(*chain)) {
                 eq_.install(std::move(chain), released);
                 commitLocked(next);
                 break;
             }
         }
-        current = eq_.catchUp(*chain, scratch);
+        if (GetTickCount64() > deadline) throw std::runtime_error("EQ chain could not catch up with the audio history");
+        ++syncRetries_;
+        if (current) {
+            std::this_thread::yield();
+            current = eq_.catchUp(*chain, scratch);
+        } else {
+            chain = EqStage::build(next, sampleRate, channels);
+            ++chainsBuilt_;
+            current = eq_.warm(*chain, scratch);
+        }
     }
     parameters_ = std::move(next);
 }
@@ -265,7 +271,7 @@ void DspAdapter::collect() {
     eq_.takeRetired(garbage);
 }
 DspAdapter::Stats DspAdapter::stats() const noexcept {
-    return {chainsBuilt_.load(), upstreamSetterCalls_.load(), lockedCatchUps_.load(),
+    return {chainsBuilt_.load(), upstreamSetterCalls_.load(), syncRetries_.load(),
         applyLockMaxNanoseconds_.load(), applyLockMaxCycles_.load()};
 }
 std::size_t DspAdapter::fadeFrames() {

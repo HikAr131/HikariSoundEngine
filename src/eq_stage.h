@@ -79,7 +79,6 @@ public:
     bool retarget(const Parameters& next, std::unique_ptr<EqChain>& released) noexcept;
     void install(std::unique_ptr<EqChain> chain, std::unique_ptr<EqChain>& released) noexcept;
     void takeRetired(std::vector<std::unique_ptr<EqChain>>& output);
-    void catchUpLocked(EqChain& chain, std::vector<float>& scratch);
     void process(float* interleaved, std::size_t frames) noexcept;
     std::uint64_t written() const noexcept { return history_ ? history_->written() : 0; }
     const float* dry(std::uint64_t frame) const noexcept { return history_->frame(frame); }
@@ -95,7 +94,7 @@ private:
     std::unique_ptr<InputHistory> history_;
     std::vector<double> fade_;
     std::vector<float> scratch_;
-    unsigned sampleRate_ = 0, channels_ = 0;
+    unsigned channels_ = 0;
     std::unique_ptr<EqChain> active_, incoming_, pending_;
     std::array<std::unique_ptr<EqChain>, kRetiredSlots> retired_{};
     std::array<TransitionRecord, kTransitionRecords> transitions_{};

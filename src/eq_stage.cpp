@@ -110,7 +110,6 @@ void EqStage::reset(Resources& resources, std::unique_ptr<EqChain> active,
     std::swap(history_, resources.history);
     std::swap(fade_, resources.fade);
     std::swap(scratch_, resources.scratch);
-    sampleRate_ = resources.sampleRate;
     channels_ = resources.channels;
     active->consumed = 0;
     active_ = std::move(active);
@@ -147,14 +146,6 @@ void EqStage::install(std::unique_ptr<EqChain> chain, std::unique_ptr<EqChain>& 
 
 void EqStage::takeRetired(std::vector<std::unique_ptr<EqChain>>& output) {
     for (auto& slot : retired_) if (slot) output.push_back(std::move(slot));
-}
-
-void EqStage::catchUpLocked(EqChain& chain, std::vector<float>& scratch) {
-    // The writer is blocked here, so this converges; it only runs when lock-free attempts kept losing the race.
-    if (catchUp(chain, scratch)) return;
-    chain.filter = ParametricEq();
-    chain.filter.configure(chain.config, sampleRate_, channels_);
-    if (!warm(chain, scratch)) throw std::runtime_error("EQ chain could not be synchronized");
 }
 
 void EqStage::record(std::uint64_t frame, unsigned kind) noexcept {

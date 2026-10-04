@@ -17,7 +17,7 @@ public:
     struct Stats {
         std::uint64_t chainsBuilt = 0;
         std::uint64_t upstreamSetterCalls = 0;
-        std::uint64_t lockedCatchUps = 0;
+        std::uint64_t syncRetries = 0;
         std::uint64_t applyLockMaxNanoseconds = 0;
         std::uint64_t applyLockMaxCycles = 0;
     };
@@ -55,7 +55,7 @@ private:
     int sampleRate_ = 0;
     int channels_ = 0;
     std::atomic<std::uint64_t> audioFrames_{0};
-    std::atomic<std::uint64_t> chainsBuilt_{0}, upstreamSetterCalls_{0}, lockedCatchUps_{0};
+    std::atomic<std::uint64_t> chainsBuilt_{0}, upstreamSetterCalls_{0}, syncRetries_{0};
     std::atomic<std::uint64_t> applyLockMaxNanoseconds_{0}, applyLockMaxCycles_{0};
 };
 
