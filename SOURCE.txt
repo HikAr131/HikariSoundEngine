@@ -1,13 +1,15 @@
-HikariSoundEngine 1.0.0
+HikariSoundEngine 1.0.1
 License: AGPL-3.0-or-later
-Intended public source: https://github.com/HikAr131/HikariSoundEngine
-Publication status: NOT PUBLISHED. Do not redistribute a binary before the corresponding source is publicly available.
+Public source repository: https://github.com/HikAr131/HikariSoundEngine
+Corresponding source for this version: tag v1.0.1, Release https://github.com/HikAr131/HikariSoundEngine/releases/tag/v1.0.1 with HikariSoundEngine-source.zip attached.
+Earlier version: 1.0.0 is tag v1.0.0, Release https://github.com/HikAr131/HikariSoundEngine/releases/tag/v1.0.0.
+Do not redistribute a binary before its corresponding source is publicly available.
 Upstream application source: https://github.com/fxsound2/fxsound-app/tree/d8e7a23d37ed5939c2a3090a1c1756c7f2500b17
 Upstream driver source reference: https://github.com/fxsound2/fxsound-driver/tree/c78fc6d031d16bd0a5dbbdff4871cfb8715d343d
-The complete helper source archive must include the pinned submodule contents and patches.
+The source archive includes the helper sources, patches and build scripts, every source and build file of the pinned upstream, the three redistributed driver files and the driver source reference.
+The complete upstream, including the prebuilt binaries omitted from the source archive, is available at https://github.com/fxsound2/fxsound-app/tree/d8e7a23d37ed5939c2a3090a1c1756c7f2500b17; the omitted files are listed with their git blob IDs in SOURCE-ARCHIVE.json.
 The unmodified signed driver binaries have not been rebuilt or verified against the source reference.
 Local corresponding source archive: dist/HikariSoundEngine-source.zip
 Extracted offline build entry: build-from-source.ps1
 SOURCE-ARCHIVE.json records source pins and every included file hash.
-The complete upstream, including the prebuilt binaries omitted from the source archive, is available at https://github.com/fxsound2/fxsound-app/tree/d8e7a23d37ed5939c2a3090a1c1756c7f2500b17; the omitted files are listed with their git blob IDs in SOURCE-ARCHIVE.json.
 The official GUI Resources nested gitlink is recorded but its contents are omitted; it is not a helper build input.

@@ -43,8 +43,9 @@ at zero dynamic boost. A low-level five-frequency sine comparison confirmed
 a constant nominal attenuation of approximately 0.3 dB. The Hikari segment
 calibrates the input to that unchanged optimizer by `1 / 0.966051`, after EQ
 and before upstream processing, to meet the zero-effects flat-response target.
-Bypass remains unchanged; the optimizer remains active, and full-scale
-multichannel tests still require finite output at or below unity.
+The calibration applies only to the processed path; the optimizer remains
+active, and full-scale multichannel tests still require finite output at or
+below unity.
 The allowed 128-filter extreme (128 enabled PK filters at 1000 Hz, +20 dB,
 Q 10, with +20 dB preamp) produced NaN inside upstream processing on the
 second stereo block even at 0.001 input level. The host input calibration
@@ -77,3 +78,14 @@ not install drivers, alter default devices, play audio or create startup entries
 Offline measure isolation uses a fresh GUID in its volatile HKCU test key, in
 addition to the PID. A reused PID cannot collide with a key left by an earlier
 abnormal test exit. The process only deletes the exact key it created.
+
+Host-side handling added in 1.0.1 (2026-10-04) changes no upstream code. The
+host no longer toggles the upstream power switch for bypass: it renders bypass
+as a 20 ms fade between the processed output and the untouched input, so the
+upstream effects and optimizer keep running underneath and leaving bypass
+fades back into a settled state. Upstream effect setters are called only when
+a value changes, and the constant settings (power on, upstream EQ off, balance,
+normalization, volume leveling, master gain) are applied once per DSP
+instance; the setters stay serialized with processing because the upstream
+DSP is not thread-safe. The playback `Initialize` report described in the
+table above is the only new patch hook.
