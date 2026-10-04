@@ -6,6 +6,7 @@ import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
 import { execFileSync } from 'node:child_process';
+import { isOmittedUpstreamBinary, omissionPolicy, redistributedDriverNames } from './source-archive-policy.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
 const appPin = 'd8e7a23d37ed5939c2a3090a1c1756c7f2500b17';
@@ -20,7 +21,7 @@ const sourceDirs = new Set(['src', 'tests', 'patches', 'tools', 'docs']);
 const required = ['CMakeLists.txt', 'build.ps1', 'app.manifest', 'LICENSE', 'LICENSE-MS-LPL.txt',
   'LICENSE-MS-LPL.rtf', 'SOURCE.txt', 'THIRD-PARTY.md', 'patches/01-headless-host.patch',
   'tests/eq-vectors.json', 'tests/graphic-vectors.json', 'tools/archive-source.mjs',
-  'tools/verify-upstream.mjs', 'docs/source-archive.md'];
+  'tools/source-archive-policy.mjs', 'tools/verify-upstream.mjs', 'docs/source-archive.md'];
 const forbiddenDirs = new Set(['.git', 'build', 'dist', '.scratch', 'plan', 'node_modules', '.claude', '.hotfix-keys']);
 
 function run(executable, args, cwd = root) {
@@ -54,10 +55,19 @@ async function walk(directory, prefix = '', ignoredRootDirs = new Set()) {
   }
   return files.sort();
 }
+async function pathExists(file) {
+  try { await fsp.lstat(file); return true; } catch (error) {
+    if (error.code === 'ENOENT' || error.code === 'ENOTDIR') return false;
+    throw error;
+  }
+}
+function totals(items) { return { files: items.length, bytes: items.reduce((sum, item) => sum + item.bytes, 0) }; }
 async function verifyExtracted(directory) {
   const manifest = JSON.parse(await fsp.readFile(path.join(directory, 'SOURCE-ARCHIVE.json'), 'utf8'));
-  if (manifest.format !== 1 || manifest.app.commit !== appPin || !Array.isArray(manifest.files))
+  if (manifest.format !== 2 || manifest.app.commit !== appPin || !Array.isArray(manifest.files))
     throw Error('Source manifest format/pin mismatch');
+  if (manifest.omissionPolicy !== omissionPolicy || !Array.isArray(manifest.omitted))
+    throw Error('Source manifest omission policy mismatch');
   const seen = new Set();
   for (const item of manifest.files) {
     assertPublicPath(item.path);
@@ -68,6 +78,16 @@ async function verifyExtracted(directory) {
     const stat = await fsp.lstat(file);
     if (!stat.isFile() || stat.isSymbolicLink() || stat.size !== item.bytes || await hashFile(file) !== item.sha256)
       throw Error(`Source hash mismatch: ${item.path}`);
+  }
+  for (const file of seen) if (isOmittedUpstreamBinary(file)) throw Error(`Included file matches the omission policy: ${file}`);
+  const omittedPaths = new Set();
+  for (const item of manifest.omitted) {
+    assertPublicPath(item.path);
+    if (omittedPaths.has(item.path) || seen.has(item.path) || !isOmittedUpstreamBinary(item.path) ||
+        !/^[a-f0-9]{40}$/.test(item.gitBlob) || !Number.isSafeInteger(item.bytes) || item.bytes < 0)
+      throw Error(`Invalid omitted manifest entry: ${item.path}`);
+    omittedPaths.add(item.path);
+    if (await pathExists(path.join(directory, ...item.path.split('/')))) throw Error(`Omitted upstream binary is present: ${item.path}`);
   }
   const actual = (await walk(directory, '', new Set(['build', 'dist']))).filter(file => file !== 'SOURCE-ARCHIVE.json');
   if (actual.length !== seen.size || actual.some(file => !seen.has(file))) throw Error('Unexpected file in source snapshot');
@@ -83,7 +103,8 @@ async function verifyExtracted(directory) {
 
 if (argv.has('--verify-extracted')) {
   const manifest = await verifyExtracted(root);
-  console.log(JSON.stringify({ ok: true, verifiedFiles: manifest.files.length, appPin, draft: manifest.draft }));
+  console.log(JSON.stringify({ ok: true, verifiedFiles: manifest.files.length, omittedAbsent: manifest.omitted.length,
+    appPin, draft: manifest.draft }));
   process.exit(0);
 }
 
@@ -100,28 +121,36 @@ try { helperCommit = git(['rev-parse', '--verify', 'HEAD']).trim(); } catch { if
 function inventory(repo, pin, prefix, requireClean = true) {
   if (git(['rev-parse', 'HEAD'], repo).trim() !== pin || (requireClean && git(['status', '--porcelain'], repo).trim()))
     throw Error(`Pinned upstream must be clean: ${prefix}`);
-  const entries = git(['ls-tree', '-rz', '--full-tree', pin], repo).split(String.fromCharCode(0)).filter(Boolean);
-  const files = [], gitlinks = [];
+  const entries = git(['ls-tree', '-rlz', '--full-tree', pin], repo).split(String.fromCharCode(0)).filter(Boolean);
+  const files = [], omitted = [], gitlinks = [];
   for (const line of entries) {
-    const match = /^(\d+) (blob|commit) ([a-f0-9]{40})\t(.+)$/.exec(line);
+    const match = /^(\d+) (blob|commit) ([a-f0-9]{40}) +(\d+|-)\t(.+)$/.exec(line);
     if (!match) throw Error(`Unsupported git tree entry: ${line}`);
-    const [, mode, type, oid, file] = match;
-    assertPublicPath(`${prefix}/${file}`);
-    if (type === 'commit') gitlinks.push({ path: `${prefix}/${file}`, commit: oid });
+    const [, mode, type, oid, size, file] = match;
+    const archivePath = `${prefix}/${file}`;
+    assertPublicPath(archivePath);
+    if (type === 'commit') gitlinks.push({ path: archivePath, commit: oid });
     else {
-      if (mode !== '100644' && mode !== '100755') throw Error(`Unsupported upstream link/mode: ${file}`);
-      files.push(`${prefix}/${file}`);
+      if ((mode !== '100644' && mode !== '100755') || size === '-') throw Error(`Unsupported upstream link/mode: ${file}`);
+      (isOmittedUpstreamBinary(archivePath) ? omitted : files).push({ path: archivePath, bytes: Number(size), gitBlob: oid });
     }
   }
-  return { files, gitlinks };
+  return { files, omitted, gitlinks };
 }
 const appRepo = path.join(root, 'upstream/fxsound-app');
 const app = inventory(appRepo, appPin, 'upstream/fxsound-app');
 const driverRepo = path.join(root, '.scratch/fxsound-driver');
 const driver = fs.existsSync(path.join(driverRepo, '.git')) ? inventory(driverRepo, driverPin, 'upstream/fxsound-driver-source', false) : null;
-const list = { helper: helperFiles, app: { commit: appPin, files: app.files, excludedNestedGitlinks: app.gitlinks },
-  driver: driver ? { commit: driverPin, files: driver.files, excludedNestedGitlinks: driver.gitlinks } : null,
-  generated: ['build-from-source.ps1', 'SOURCE-ARCHIVE.json'], draft };
+const omitted = [...app.omitted, ...(driver ? driver.omitted : [])];
+const helperSizes = helperFiles.map(file => ({ path: file, bytes: fs.statSync(path.join(root, ...file.split('/'))).size }));
+const summary = { included: totals([...helperSizes, ...app.files, ...(driver ? driver.files : [])]), omitted: totals(omitted),
+  helper: totals(helperSizes), app: { included: totals(app.files), omitted: totals(app.omitted) },
+  driver: driver ? { included: totals(driver.files), omitted: totals(driver.omitted) } : null,
+  note: 'Included totals exclude the generated build-from-source.ps1 and SOURCE-ARCHIVE.json.' };
+const list = { summary, helper: helperFiles,
+  app: { commit: appPin, files: app.files.map(item => item.path), excludedNestedGitlinks: app.gitlinks },
+  driver: driver ? { commit: driverPin, files: driver.files.map(item => item.path), excludedNestedGitlinks: driver.gitlinks } : null,
+  omissionPolicy, omitted, generated: ['build-from-source.ps1', 'SOURCE-ARCHIVE.json'], draft };
 if (argv.has('--list')) { console.log(JSON.stringify(list, null, 2)); process.exit(0); }
 
 const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), 'hikari-source-archive-'));
@@ -138,15 +167,31 @@ try {
     await fsp.mkdir(path.dirname(destination), { recursive: true });
     await fsp.copyFile(source, destination);
   }
-  async function archiveUpstream(repo, pin, prefix, expected) {
+  async function archiveUpstream(repo, pin, prefix, tree) {
     const tarFile = path.join(scratch, `${prefix.split('/').at(-1)}.tar`);
+    const staged = file => path.join(staging, ...file.split('/'));
     git(['archive', '--format=tar', `--prefix=${prefix}/`, `--output=${tarFile}`, pin], repo);
     run('tar.exe', ['-xf', tarFile, '-C', staging]);
-    for (const file of expected) if (!fs.existsSync(path.join(staging, ...file.split('/')))) throw Error(`Git archive omitted tracked source: ${file}`);
+    for (const { path: file } of tree.files) if (!fs.existsSync(staged(file))) throw Error(`Git archive omitted tracked source: ${file}`);
+    const parents = new Set();
+    for (const item of tree.omitted) {
+      if (!item.path.startsWith(`${prefix}/`)) throw Error(`Omitted path outside its upstream: ${item.path}`);
+      const stat = await fsp.lstat(staged(item.path));
+      if (!stat.isFile() || stat.size !== item.bytes) throw Error(`Unexpected prebuilt upstream file: ${item.path}`);
+      await fsp.unlink(staged(item.path));
+      for (let parent = path.posix.dirname(item.path); parent !== prefix; parent = path.posix.dirname(parent)) parents.add(parent);
+    }
+    // Drop directories emptied by the omission, deepest first.
+    for (const parent of [...parents].sort((a, b) => b.split('/').length - a.split('/').length))
+      if (!(await fsp.readdir(staged(parent))).length) await fsp.rmdir(staged(parent));
   }
-  await archiveUpstream(appRepo, appPin, 'upstream/fxsound-app', app.files);
-  if (driver) await archiveUpstream(driverRepo, driverPin, 'upstream/fxsound-driver-source', driver.files);
+  await archiveUpstream(appRepo, appPin, 'upstream/fxsound-app', app);
+  if (driver) await archiveUpstream(driverRepo, driverPin, 'upstream/fxsound-driver-source', driver);
   const buildOriginal = await fsp.readFile(path.join(staging, 'build.ps1'), 'utf8');
+  const driverCopy = `foreach ($name in @(${redistributedDriverNames.map(name => `'${name}'`).join(', ')}))`;
+  if (buildOriginal.split(driverCopy).length !== 2 ||
+      !buildOriginal.includes(['Installer', 'Drivers', 'Version14', 'win10', 'x64', '$name'].join(String.fromCharCode(92))))
+    throw Error('Redistributed driver copy changed; the binary omission policy must be reviewed');
   const preflightStart = buildOriginal.indexOf('    $head = & git -C $upstreamRoot rev-parse HEAD');
   const preflightEnd = buildOriginal.indexOf('    New-Item -ItemType Directory -Path $buildRoot', preflightStart);
   if (preflightStart < 0 || preflightEnd < 0) throw Error('Build preflight changed; archive builder must be reviewed');
@@ -161,9 +206,10 @@ try {
     const source = path.join(staging, ...file.split('/'));
     files.push({ path: file, bytes: (await fsp.stat(source)).size, sha256: await hashFile(source) });
   }
-  const manifest = { format: 1, draft, helperCommit, helperFiles, app: list.app, driver: list.driver,
+  const manifest = { format: 2, draft, helperCommit, helperFiles, app: list.app, driver: list.driver,
     omittedNestedResources: 'Official GUI-only Resources gitlink is recorded but not a helper build input.',
-    driverBinarySourceMatch: 'NOT VERIFIED; pinned unmodified signed binaries and reference driver source are included separately.', files };
+    driverBinarySourceMatch: 'NOT VERIFIED; pinned unmodified signed binaries and reference driver source are included separately.',
+    omissionPolicy, omitted, files };
   await fsp.writeFile(path.join(staging, 'SOURCE-ARCHIVE.json'), JSON.stringify(manifest, null, 2) + '\n');
   await verifyExtracted(staging);
   const zipTemporary = path.join(scratch, 'source.zip');
@@ -192,7 +238,8 @@ try {
   await fsp.mkdir(path.dirname(output), { recursive: true });
   await fsp.copyFile(zipTemporary, output);
   console.log(JSON.stringify({ ok: true, output, draft, files: extractedManifest.files.length,
-    bytes: (await fsp.stat(output)).size, sha256: await hashFile(output), verification: 'full extraction, every-file SHA256, upstream project compile inputs, and patch applicability' }, null, 2));
+    omitted: totals(extractedManifest.omitted), bytes: (await fsp.stat(output)).size, sha256: await hashFile(output),
+    verification: 'full extraction, every-file SHA256, omitted binaries absent, upstream project compile inputs, and patch applicability' }, null, 2));
 } finally {
   const resolved = path.resolve(scratch);
   if (path.dirname(resolved) !== path.resolve(os.tmpdir()) || !path.basename(resolved).startsWith('hikari-source-archive-'))

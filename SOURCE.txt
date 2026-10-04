@@ -9,4 +9,5 @@ The unmodified signed driver binaries have not been rebuilt or verified against 
 Local corresponding source archive: dist/HikariSoundEngine-source.zip
 Extracted offline build entry: build-from-source.ps1
 SOURCE-ARCHIVE.json records source pins and every included file hash.
+The complete upstream, including the prebuilt binaries omitted from the source archive, is available at https://github.com/fxsound2/fxsound-app/tree/d8e7a23d37ed5939c2a3090a1c1756c7f2500b17; the omitted files are listed with their git blob IDs in SOURCE-ARCHIVE.json.
 The official GUI Resources nested gitlink is recorded but its contents are omitted; it is not a helper build input.
