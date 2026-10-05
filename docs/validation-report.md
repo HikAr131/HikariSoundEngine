@@ -2,6 +2,22 @@
 
 這份報告不把離線自測當成音訊裝置、驅動或遊戲驗證；所有驗證都沒有安裝驅動、切換預設裝置、向實體裝置播放測試音或建立啟動項。A4 量測仍保留待測。
 
+## 1.0.2 修正（2026-10-05）
+
+1.0.1 散布的 `fxvad.inf` 是上游倉庫裡的 LF 版，但微軟簽章目錄收錄的是同一內容的 CRLF 版。Windows 因此把整個驅動套件判為未簽章，1U 以非互動方式安裝時一律被拒，內測回報兩台 Win11 都裝不上虛擬聲卡。1.0.2 的程式與 1.0.1 相同，只改兩件事：
+
+- `build.ps1` 原樣複製 `.sys` 與 `.cat`，`fxvad.inf` 只把 LF 還原成 CRLF；上游檔案若已含 CR 就讓建置失敗，不重複轉換。
+- `tools/verify-distribution.mjs` 要求 `fxvad.inf` 等於上游還原 CRLF 後的位元組，並用 Windows SDK 的 signtool 以 Plug and Play 的驅動驗證原則（`/pg {F750E6C3-38EE-11D1-85E5-00C04FC295EE}`）核對 `fxvad.inf` 與 `fxvad.sys` 都在簽章目錄內，不在就讓建置失敗。
+
+實跑證據：
+
+- 對 1.0.1 散布的 INF 執行 `signtool verify /pg <驅動原則> /c fxvadntamd64.cat fxvad.inf`，結果為 `File not found in the specified catalog`；同一內容換成 CRLF 後驗證成功，`fxvad.sys` 也驗證成功。
+- 變異驗證：把 LF 版放回 `dist/drivers`，建置驗證失敗（`Driver original was modified: fxvad.inf`）；再拿掉位元組比對那一層，簽章目錄核對仍然擋下（`Driver file is not covered by the signed catalog: fxvad.inf`）；放回 CRLF 版的對照組通過。
+- 連續兩次 `build.ps1 -Clean` 都退出 0，完整自測通過。執行檔逐位元組相同：未簽章 1,285,120 bytes，SHA256 `d5a608e9dab16a308467f9e08bdaabfafdb2594cbdfef02de23c2ed1adecbc11`；簽章後雜湊會變。
+- `fxvad.inf` 現為 5,334 bytes，SHA256 `ba175cfddd91b87bdda3f1df2a70249e1742e846b843381eb0438b70f91a110a`；`.sys` 與 `.cat` 的雜湊和 1.0.1 相同。
+
+開發機仍然不安裝驅動，所以「Windows 實際接受這個套件」要到虛擬機上第一次開啟音效增強時才算驗證過。
+
 ## 1.0.1 補做（2026-10-04）
 
 1.0.0（`a3cd408`）之後補了三件事：參數變更不再咔嗒、輸出裝置被獨佔時回報並自動恢復、來源封存只收原始碼與建置檔。主會話另外追加三件：新增 `ready` 狀態、`bypass` 不持久化、非 KnownDLL 改延遲載入並限制 DLL 搜尋路徑。1.0.0 後來已由會話 B 公開並以 1U 憑證簽章；1.0.1 是新版本號，不改寫 `v1.0.0`。
@@ -154,10 +170,10 @@
 | 檔案 | SHA256 |
 | --- | --- |
 | fxvad.sys | `425629b6309000013e8cd1a9b827bee365d21c9f743873aadd0c3bc96a999d2a` |
-| fxvad.inf | `b7049bfce3bd60ede027518785d3087c48f546e0ff082af634eb9d819c81d273` |
+| fxvad.inf | `ba175cfddd91b87bdda3f1df2a70249e1742e846b843381eb0438b70f91a110a`（1.0.2 起，CRLF；1.0.0／1.0.1 散布的 LF 版是 `b7049bfce3bd60ede027518785d3087c48f546e0ff082af634eb9d819c81d273`，不在簽章目錄內） |
 | fxvadntamd64.cat | `25c8dae186155d20f74feedefb4f84161e4215925b8fd0c898f68f3e50ebcd7d` |
 
-以上來自固定 app 子模組的 Version14/win10/x64；只複製，沒有修改或另簽。它們與參考驅動原始碼能否重建成相同簽章二進位仍為 NOT VERIFIED。
+以上來自固定 app 子模組的 Version14/win10/x64；沒有另簽，`.sys` 與 `.cat` 原樣複製，`fxvad.inf` 只把行尾還原成簽章時的 CRLF。它們與參考驅動原始碼能否重建成相同簽章二進位仍為 NOT VERIFIED。
 
 ## 待測與交付界線
 

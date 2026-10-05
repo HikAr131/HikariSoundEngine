@@ -94,9 +94,19 @@ try {
     }
     $driverOutput = Join-Path $outputRoot 'drivers'
     New-Item -ItemType Directory -Path $driverOutput -Force | Out-Null
-    foreach ($name in @('fxvad.sys', 'fxvad.inf', 'fxvadntamd64.cat')) {
+    foreach ($name in @('fxvad.sys', 'fxvadntamd64.cat')) {
         Copy-Item -LiteralPath (Join-Path $upstreamRoot "Installer\Drivers\Version14\win10\x64\$name") -Destination (Join-Path $driverOutput $name) -Force
     }
+    # The repository stores fxvad.inf with LF, but the Microsoft-signed catalog covers its CRLF form.
+    # Windows refuses a package whose INF is not in its catalog, so restore exactly the signed bytes.
+    $infSource = [IO.File]::ReadAllBytes((Join-Path $upstreamRoot 'Installer\Drivers\Version14\win10\x64\fxvad.inf'))
+    if ($infSource -contains [byte]13) { throw 'Upstream fxvad.inf already contains CR; review the line ending restoration' }
+    $infBytes = New-Object 'System.Collections.Generic.List[byte]'
+    foreach ($value in $infSource) {
+        if ($value -eq 10) { $infBytes.Add([byte]13) }
+        $infBytes.Add($value)
+    }
+    [IO.File]::WriteAllBytes((Join-Path $driverOutput 'fxvad.inf'), $infBytes.ToArray())
     Copy-Item -LiteralPath (Join-Path $upstreamRoot 'LICENSE') -Destination (Join-Path $outputRoot 'LICENSE-AGPL-3.0.txt') -Force
     foreach ($document in @('THIRD-PARTY.md', 'SOURCE.txt', 'LICENSE-MS-LPL.txt', 'LICENSE-MS-LPL.rtf')) {
         $sourceDocument = Join-Path $taskRoot $document
@@ -115,5 +125,5 @@ try {
         '{0}  {1}' -f $digest, $relative
     }
     [IO.File]::WriteAllText((Join-Path $outputRoot 'SHA256SUMS.txt'), (($hashes -join "`n") + "`n"), [Text.UTF8Encoding]::new($false))
-    Write-Host 'Build and offline self-test passed. Drivers were copied only.'
+    Write-Host 'Build and offline self-test passed. Drivers were copied unchanged except fxvad.inf, restored to its signed CRLF form and verified against the catalog.'
 } finally { Pop-Location }

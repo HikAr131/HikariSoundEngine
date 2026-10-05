@@ -72,7 +72,10 @@ enumeration and shutdown work. Latency, drift, final-output disconnect and sleep
 requests require a virtual machine or test hardware; offline DSP success does
 not establish those results.
 
-The signed `Version14/win10/x64` driver files are copied unchanged. The build does
+The signed `Version14/win10/x64` driver files are copied unchanged, except that
+`fxvad.inf` gets back the CRLF line endings it had when it was signed: the upstream
+repository stores it with LF, and the signed catalog only covers the CRLF bytes
+(1.0.2). The build verifies the INF and the driver against the catalog. It does
 not install drivers, alter default devices, play audio or create startup entries.
 
 Offline measure isolation uses a fresh GUID in its volatile HKCU test key, in

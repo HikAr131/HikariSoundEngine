@@ -2,7 +2,7 @@
 
 Windows x64 的無介面音效常駐程式，將 FxSound 的 `audiopassthru` 與 `dsp` 包成可以單獨使用的命令列工具。宿主以 AGPL-3.0-or-later 提供；與 1U 透過具名管線交換 JSON，1U 不連結這個倉庫的程式碼。它不安裝驅動、不建立啟動項、不連網，需要先有 FxSound 虛擬播放端點。
 
-版本 1.0.1。1.0.0 已公開（tag `v1.0.0`，對應提交 `a3cd408`）；1.0.1 在其上加入參數變更的交叉淡化、輸出裝置被獨佔時的回報與自動恢復、與有無聲音無關的 `ready` 狀態、不持久化的 `bypass`、只從 System32 載入 DLL，以及只收原始碼與建置檔的來源封存。公開狀態以 `SOURCE.txt` 為準。真實音訊的虛擬機驗收與 A4 量測仍為 **NOT RUN**。沒有虛擬裝置時 `run` 在建立宿主、寫檔、寫登錄檔或切換預設裝置之前回 `VIRTUAL_DEVICE_MISSING`。開發機禁止安裝驅動、切換預設播放裝置、向實體裝置播放測試音及建立啟動項。
+版本 1.0.2。1.0.0 已公開（tag `v1.0.0`，對應提交 `a3cd408`）；1.0.1 在其上加入參數變更的交叉淡化、輸出裝置被獨佔時的回報與自動恢復、與有無聲音無關的 `ready` 狀態、不持久化的 `bypass`、只從 System32 載入 DLL，以及只收原始碼與建置檔的來源封存。1.0.2 的程式與 1.0.1 相同，只修正隨元件散布的 `fxvad.inf`：上游倉庫以 LF 存它，微軟簽章目錄收錄的是 CRLF 版；1.0.1 照抄 LF 版，Windows 因而判定驅動套件未簽章、拒絕安裝。公開狀態以 `SOURCE.txt` 為準。真實音訊的虛擬機驗收與 A4 量測仍為 **NOT RUN**。沒有虛擬裝置時 `run` 在建立宿主、寫檔、寫登錄檔或切換預設裝置之前回 `VIRTUAL_DEVICE_MISSING`。開發機禁止安裝驅動、切換預設播放裝置、向實體裝置播放測試音及建立啟動項。
 
 ## 建置
 
@@ -13,7 +13,7 @@ git submodule update --init
 powershell -NoProfile -ExecutionPolicy Bypass -File build.ps1 -Clean
 ```
 
-腳本複製兩個上游函式庫到 `build/upstream`，核對並套用 `patches/`，編譯 x64 `/MT`、GUI subsystem、asInvoker、`/Brepro`，執行離線自測後才交付 `dist/HikariSoundEngine.exe` 與 `SHA256SUMS.txt`。自測失敗或超時會使建置失敗。helper 會放在使用者可寫的目錄，所以靜態匯入只許 KnownDLL（ADVAPI32、KERNEL32、ole32、SHELL32、USER32），CFGMGR32 與 WTSAPI32 改為延遲載入，`wWinMain` 第一件事就把 DLL 搜尋限制在 System32；每次建置都由 `tools/verify-distribution.mjs` 檢查匯入表與這個呼叫，不符就建置失敗。`dist/drivers/` 的三個檔案是原上游已簽章檔案，只複製、不安裝、不修改或另行簽章。
+腳本複製兩個上游函式庫到 `build/upstream`，核對並套用 `patches/`，編譯 x64 `/MT`、GUI subsystem、asInvoker、`/Brepro`，執行離線自測後才交付 `dist/HikariSoundEngine.exe` 與 `SHA256SUMS.txt`。自測失敗或超時會使建置失敗。helper 會放在使用者可寫的目錄，所以靜態匯入只許 KnownDLL（ADVAPI32、KERNEL32、ole32、SHELL32、USER32），CFGMGR32 與 WTSAPI32 改為延遲載入，`wWinMain` 第一件事就把 DLL 搜尋限制在 System32；每次建置都由 `tools/verify-distribution.mjs` 檢查匯入表與這個呼叫，不符就建置失敗。`dist/drivers/` 的三個檔案是原上游已簽章檔案，不安裝、不另行簽章；`.sys` 與 `.cat` 原樣複製，`fxvad.inf` 只把行尾還原成簽章時的 CRLF。建置最後用 Windows SDK 的 signtool 以驅動驗證原則核對 `fxvad.inf` 與 `fxvad.sys` 都在簽章目錄內，不在就建置失敗。
 
 ## 單獨使用
 

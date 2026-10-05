@@ -43,12 +43,31 @@ if (!/^\s+[0-9A-F]+\s+SetDefaultDllDirectories\s*$/m.test(staticText)) throw new
 const mainSource = fs.readFileSync(path.join(root, 'src/main.cpp'), 'utf8').replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, '');
 if (!/int\s+WINAPI\s+wWinMain\s*\([^)]*\)\s*\{\s*if\s*\(\s*!\s*SetDefaultDllDirectories\s*\(\s*LOAD_LIBRARY_SEARCH_SYSTEM32\s*\)\s*\)/.test(mainSource))
   throw new Error('wWinMain must restrict the DLL search to System32 before anything else');
+// The upstream repository stores fxvad.inf with LF; the signed catalog covers the CRLF form.
+const signedLineEndings = bytes => {
+  if (bytes.includes(13)) throw new Error('Upstream fxvad.inf already contains CR; review the line ending restoration');
+  return Buffer.from(bytes.toString('latin1').split(String.fromCharCode(10)).join(String.fromCharCode(13, 10)), 'latin1');
+};
 const driverHashes = {};
 for (const name of ['fxvad.sys', 'fxvad.inf', 'fxvadntamd64.cat']) {
   const distributed = fs.readFileSync(path.join(root, 'dist/drivers', name));
   const original = fs.readFileSync(path.join(root, 'upstream/fxsound-app/Installer/Drivers/Version14/win10/x64', name));
-  if (!distributed.equals(original)) throw new Error(`Driver original was modified: ${name}`);
+  const expected = name === 'fxvad.inf' ? signedLineEndings(original) : original;
+  if (!distributed.equals(expected)) throw new Error(`Driver original was modified: ${name}`);
   driverHashes[name] = crypto.createHash('sha256').update(distributed).digest('hex');
 }
+// Windows installs the package only when the INF and the driver are both listed in the signed catalog;
+// verify them under the driver policy that Plug and Play applies.
+const kitsBin = 'C:/Program Files (x86)/Windows Kits/10/bin';
+const kitVersions = fs.existsSync(kitsBin) ? fs.readdirSync(kitsBin).filter(entry => /^\d+(?:\.\d+){3}$/.test(entry)) : [];
+kitVersions.sort((a, b) => a.split('.').map(Number).reduce((order, part, index) => order || part - Number(b.split('.')[index]), 0));
+const signtool = kitVersions.reverse().map(version => path.join(kitsBin, version, 'x64', 'signtool.exe')).find(file => fs.existsSync(file));
+if (!signtool) throw new Error('signtool.exe from the Windows SDK is required to verify the driver catalog');
+const driverPolicy = '{F750E6C3-38EE-11D1-85E5-00C04FC295EE}';
+for (const name of ['fxvad.inf', 'fxvad.sys']) {
+  try {
+    execFileSync(signtool, ['verify', '/q', '/pg', driverPolicy, '/c', path.join(root, 'dist/drivers/fxvadntamd64.cat'), path.join(root, 'dist/drivers', name)], { stdio: 'pipe', windowsHide: true });
+  } catch { throw new Error(`Driver file is not covered by the signed catalog: ${name}`); }
+}
 if (process.argv[2] && !bytes.equals(fs.readFileSync(process.argv[2]))) throw new Error('Clean builds differ byte for byte');
-console.log(JSON.stringify({ ok: true, x64: true, guiSubsystem: true, staticCrt: true, cleanBuildsIdentical: !!process.argv[2], signed: bytes.readUInt32LE(optional + 148) !== 0, exeBytes: bytes.length, exeSha256: crypto.createHash('sha256').update(bytes).digest('hex'), staticImports, delayLoadImports, dllSearch: 'System32 only', driverHashes }, null, 2));
+console.log(JSON.stringify({ ok: true, x64: true, guiSubsystem: true, staticCrt: true, cleanBuildsIdentical: !!process.argv[2], signed: bytes.readUInt32LE(optional + 148) !== 0, exeBytes: bytes.length, exeSha256: crypto.createHash('sha256').update(bytes).digest('hex'), staticImports, delayLoadImports, dllSearch: 'System32 only', driverHashes, driverCatalogVerified: true }, null, 2));
