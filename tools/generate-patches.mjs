@@ -9,11 +9,11 @@ const stage = path.join(root, 'plan/patch-generation');
 fs.mkdirSync(stage, {recursive:true});
 fs.mkdirSync(path.join(root, 'patches'), {recursive:true});
 const changes = new Map();
-function modify(file, transform) {
+function modify(file, transform, date = '2026-10-04') {
   const original = fs.readFileSync(path.join(upstream, file), 'utf8');
   const eol = original.includes('\r\n') ? '\r\n' : '\n';
   const transformed = transform(original.replaceAll('\r\n', '\n'), '\n');
-  const next = ('// Hikari modification 2026-10-04: isolated headless host integration; see MODIFICATIONS.md.\n' + transformed).replaceAll('\n', eol);
+  const next = (`// Hikari modification ${date}: isolated headless host integration; see MODIFICATIONS.md.\n` + transformed).replaceAll('\n', eol);
   if (next === original) throw new Error(`Unchanged patch: ${file}`);
   changes.set(file, {original, next});
 }
@@ -95,7 +95,8 @@ modify('audiopassthru/src/sndDevices/sndDevicesImplementDeviceRules.cpp', text =
 for (const file of ['audiopassthru/src/reg/regWithKeyname.cpp','audiopassthru/src/reg/regWithoutKeyname.cpp','audiopassthru/src/reg/regRecursiveDelete.cpp']) modify(file, text => {
   return replaceOne(text, '#include "codedefs.h"', '#include "hikari_upstream_hooks.h"\n#define RegCreateKeyExW hikariRegCreateKeyExW\n#define RegOpenKeyExW hikariRegOpenKeyExW\n#define RegDeleteKeyW hikariRegDeleteKeyW\n#include "codedefs.h"');
 });
-let patch = '# Hikari upstream integration: isolated registry, headless failures, host DSP/default hooks.\n';
+function writePatch(name, description) {
+let patch = description + '\n';
 for (const [file,{original,next}] of changes) {
   const before = path.join(stage,'before',file), after=path.join(stage,'after',file);
   fs.mkdirSync(path.dirname(before),{recursive:true}); fs.mkdirSync(path.dirname(after),{recursive:true});
@@ -109,5 +110,35 @@ for (const [file,{original,next}] of changes) {
   lines[minus]=`--- a/${file}`; lines[plus]=`+++ b/${file}`;
   patch+=lines.join('\n');
 }
-fs.writeFileSync(path.join(root,'patches/01-headless-host.patch'),patch);
-console.log(`Generated checked patch for ${changes.size} files; upstream tree remains untouched.`);
+fs.writeFileSync(path.join(root, 'patches', name), patch);
+console.log(`Generated ${name} for ${changes.size} files; upstream tree remains untouched.`);
+}
+writePatch('01-headless-host.patch', '# Hikari upstream integration: isolated registry, headless failures, host DSP/default hooks.');
+changes.clear();
+modify('audiopassthru/src/sndDevices/sndDevices_GetAll.cpp', text => {
+  text = replaceOne(text, '#include "codedefs.h"', '#include "hikari_upstream_hooks.h"\n#include "codedefs.h"');
+  text = replaceOne(text, 'DEVICE_STATE_ACTIVE | DEVICE_STATE_UNPLUGGED', 'DEVICE_STATE_ACTIVE');
+  text = replaceOne(text, 'if (cast_handle == NULL)\n\t\treturn(NOT_OKAY);',
+    'if (cast_handle == NULL)\n\t\treturn(NOT_OKAY);\n\thikariBeginEnumeration();');
+  for (const [status, step] of [['INSTANCE_CREATE_FAILED', 1], ['ENUMERATE_FAILED', 2], ['GETCOUNT_FAILED', 3],
+    ['GET_AUDIOENDPOINT_FAILED', 4], ['GETID_FAILED', 5]]) {
+    const previous = `if (FAILED(hr)) SND_DEVICES_SET_STATUS_AND_RETURN_OK(SND_DEVICES_${status})`;
+    if (!text.includes(previous)) throw new Error(`Missing enumeration failure anchor: ${status}`);
+    text = text.replaceAll(previous, `if (FAILED(hr)) { hikariOnEnumerationFailure(${step}, hr); SND_DEVICES_SET_STATUS_AND_RETURN_OK(SND_DEVICES_${status}); }`);
+  }
+  text = replaceOne(text, 'pDefaultDevice->GetId(&pwszIDdefault);', 'hr = pDefaultDevice->GetId(&pwszIDdefault);');
+  text = replaceOne(text, 'CoTaskMemFree(pwszIDdefault);\n\t\t\tSND_DEVICES_SET_STATUS_AND_RETURN_OK(SND_DEVICES_GET_INDEXED_DEVICE_FAILED);',
+    'CoTaskMemFree(pwszIDdefault);\n\t\t\thikariOnEnumerationFailure(6, hr);\n\t\t\tSND_DEVICES_SET_STATUS_AND_RETURN_OK(SND_DEVICES_GET_INDEXED_DEVICE_FAILED);');
+  text = replaceOne(text, 'CoTaskMemFree(pwszIDdefault);\n\t\t\tSND_DEVICES_SET_STATUS_AND_RETURN_OK(SND_DEVICES_INSTANCE_CREATE_FAILED);',
+    'CoTaskMemFree(pwszIDdefault);\n\t\t\thikariOnEnumerationFailure(7, hr);\n\t\t\tSND_DEVICES_SET_STATUS_AND_RETURN_OK(SND_DEVICES_INSTANCE_CREATE_FAILED);');
+  text = replaceOne(text, 'if (sndDevicesGetFormatFromID(hp_sndDevices, cast_handle->pwszID[i], &wfx, &resultFlag) != OKAY)\n\t\t\t{',
+    'if (sndDevicesGetFormatFromID(hp_sndDevices, cast_handle->pwszID[i], &wfx, &resultFlag) != OKAY)\n\t\t\t{\n\t\t\t\thikariOnEnumerationFailure(8, 0);');
+  text = replaceOne(text, 'if (pstrCalcLocationOfStrInStr_Wide(cast_handle->deviceFriendlyName[i], SND_DEVICES_DFX_DEVICE_STRING,\n\t\t\t\t0, &i_found_start_location, &i_found_dfx_string) != OKAY)\n\t\t\t{',
+    'if (pstrCalcLocationOfStrInStr_Wide(cast_handle->deviceFriendlyName[i], SND_DEVICES_DFX_DEVICE_STRING,\n\t\t\t\t0, &i_found_start_location, &i_found_dfx_string) != OKAY)\n\t\t\t{\n\t\t\t\thikariOnEnumerationFailure(10, 0);');
+  text = replaceOne(text, 'hr = cast_handle->pAllDevices[i]->GetState(&cast_handle->deviceState[i]);\n\t\t\tif (FAILED(hr))\n\t\t\t{',
+    'hr = cast_handle->pAllDevices[i]->GetState(&cast_handle->deviceState[i]);\n\t\t\tif (FAILED(hr))\n\t\t\t{\n\t\t\t\thikariOnEnumerationFailure(9, hr);');
+  return text;
+}, '2026-10-08');
+modify('audiopassthru/src/sndDevices/sndDevicesReInit.cpp', text =>
+  replaceOne(text, 'DEVICE_STATE_ACTIVE | DEVICE_STATE_UNPLUGGED', 'DEVICE_STATE_ACTIVE'), '2026-10-08');
+writePatch('02-active-endpoint-enumeration.patch', '# Hikari active endpoint enumeration and private startup failure hooks.');

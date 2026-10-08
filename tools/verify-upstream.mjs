@@ -8,11 +8,29 @@ for(const match of patch.matchAll(/^\+\+\+ b\/(.+)$/gm)) {
   const file=path.join(root,'build/upstream',match[1]);
   if(!fs.readFileSync(file,'utf8').startsWith('// Hikari modification 2026-10-04:')) throw new Error(`Patch was not applied: ${file}`);
 }
+const activePatch = fs.readFileSync(path.join(root, 'patches/02-active-endpoint-enumeration.patch'), 'utf8');
+for (const match of activePatch.matchAll(/^\+\+\+ b\/(.+)$/gm)) {
+  const file = path.join(root, 'build/upstream', match[1]);
+  if (!fs.readFileSync(file, 'utf8').startsWith('// Hikari modification 2026-10-08:')) throw new Error(`Active endpoint patch was not applied: ${file}`);
+}
 const audio=fs.readFileSync(path.join(root,'build/upstream/audiopassthru/src/AudioPassthru/AudioPassthruPrivate.cpp'),'utf8');
 if(!audio.includes('hikariProcessAudio(p_dfx_dsp_') || /p_dfx_dsp_->(?:setSignalFormat|processAudio)\(/.test(audio)) throw new Error('DSP calls must be serialized by host');
 const device=fs.readFileSync(path.join(root,'build/upstream/audiopassthru/src/sndDevices/sndDevicesSet.cpp'),'utf8');
 if(!device.includes('if (!hikariAllowDefaultSwitch(cast_handle->pwszID[device_index_num])) return OKAY;')) throw new Error('Default-device host gate absent');
 const stripComments = value => value.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, '');
+const enumeration = stripComments(fs.readFileSync(path.join(root, 'build/upstream/audiopassthru/src/sndDevices/sndDevices_GetAll.cpp'), 'utf8'));
+const monitoring = stripComments(fs.readFileSync(path.join(root, 'build/upstream/audiopassthru/src/sndDevices/sndDevicesReInit.cpp'), 'utf8'));
+for (const source of [enumeration, monitoring]) {
+  if ([...source.matchAll(/EnumAudioEndpoints\(eRender,\s*DEVICE_STATE_ACTIVE,\s*&pCollectionAllDevices\)/g)].length !== 1 || /\bDEVICE_STATE_UNPLUGGED\b/.test(source))
+    throw new Error('Active endpoint enumeration and change monitoring must use the same active-only list');
+}
+if (!enumeration.includes('hr = pDefaultDevice->GetId(&pwszIDdefault);') || !enumeration.includes('hikariBeginEnumeration();'))
+  throw new Error('Default endpoint HRESULT or enumeration diagnostic reset absent');
+for (let step = 1; step <= 10; ++step) {
+  const code = step === 8 || step === 10 ? '0' : 'hr';
+  if ([...enumeration.matchAll(new RegExp(`hikariOnEnumerationFailure\\(${step}, ${code}\\);`, 'g'))].length !== (step === 5 ? 2 : 1))
+    throw new Error(`Enumeration failure diagnostic ${step} absent or duplicated`);
+}
 const setup = stripComments(fs.readFileSync(path.join(root, 'build/upstream/audiopassthru/src/sndDevices/sndDevicesSetupDevices.cpp'), 'utf8'));
 const initializations = [...setup.matchAll(/cast_handle->pAudioClient(Capture|Playback)->Initialize\(/g)];
 const guardPattern = /hr\s*=\s*hikariValidateAudioInitialization\((pwfx|pClosestMatch),\s*&cast_handle->wfx(Capture|Playback)\)\s*\?\s*cast_handle->pAudioClient(Capture|Playback)->Initialize\(([\s\S]*?)\)\s*:\s*AUDCLNT_E_UNSUPPORTED_FORMAT\s*;/g;

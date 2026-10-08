@@ -1,0 +1,129 @@
+# Hikari active endpoint enumeration and private startup failure hooks.
+diff --git a/audiopassthru/src/sndDevices/sndDevices_GetAll.cpp b/audiopassthru/src/sndDevices/sndDevices_GetAll.cpp
+index e173962..876a672 100644
+--- a/audiopassthru/src/sndDevices/sndDevices_GetAll.cpp
++++ b/audiopassthru/src/sndDevices/sndDevices_GetAll.cpp
+@@ -1,3 +1,4 @@
++// Hikari modification 2026-10-08: isolated headless host integration; see MODIFICATIONS.md.
+ /*
+ FxSound
+ Copyright (C) 2025  FxSound LLC
+@@ -15,6 +16,7 @@ GNU Affero General Public License for more details.
+ You should have received a copy of the GNU Affero General Public License
+ along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ */
++#include "hikari_upstream_hooks.h"
+ #include "codedefs.h"
+ 
+ #include <stdio.h>
+@@ -66,6 +68,7 @@ int PT_DECLSPEC sndDevices_GetAll(PT_HANDLE* hp_sndDevices, int* ip_num_devices)
+ 
+ 	if (cast_handle == NULL)
+ 		return(NOT_OKAY);
++	hikariBeginEnumeration();
+ 
+ 	// Release any IMMDevice handles left over from a previous enumeration before they are
+ 	// overwritten below. sndDevices_GetAll can be called repeatedly (the reinit loop calls
+@@ -100,15 +103,15 @@ int PT_DECLSPEC sndDevices_GetAll(PT_HANDLE* hp_sndDevices, int* ip_num_devices)
+ 	cast_handle->numRealDevices = 0;
+ 
+ 	hr = CoCreateInstance(cast_handle->CLSID_MMDeviceEnumerator, NULL, CLSCTX_ALL, cast_handle->IID_IMMDeviceEnumerator, (void**)&pEnumerator);
+-	if (FAILED(hr)) SND_DEVICES_SET_STATUS_AND_RETURN_OK(SND_DEVICES_INSTANCE_CREATE_FAILED)
++	if (FAILED(hr)) { hikariOnEnumerationFailure(1, hr); SND_DEVICES_SET_STATUS_AND_RETURN_OK(SND_DEVICES_INSTANCE_CREATE_FAILED); }
+ 
+ 		// Enumerate all playback audio devices, "eRender" means look only for playback devices.
+-		hr = pEnumerator->EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE | DEVICE_STATE_UNPLUGGED, &pCollectionAllDevices);
+-	if (FAILED(hr)) SND_DEVICES_SET_STATUS_AND_RETURN_OK(SND_DEVICES_ENUMERATE_FAILED)
++		hr = pEnumerator->EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE, &pCollectionAllDevices);
++	if (FAILED(hr)) { hikariOnEnumerationFailure(2, hr); SND_DEVICES_SET_STATUS_AND_RETURN_OK(SND_DEVICES_ENUMERATE_FAILED); }
+ 
+ 		// Now get total number of playback devices
+ 		hr = pCollectionAllDevices->GetCount(&deviceCount);
+-	if (FAILED(hr)) SND_DEVICES_SET_STATUS_AND_RETURN_OK(SND_DEVICES_GETCOUNT_FAILED)
++	if (FAILED(hr)) { hikariOnEnumerationFailure(3, hr); SND_DEVICES_SET_STATUS_AND_RETURN_OK(SND_DEVICES_GETCOUNT_FAILED); }
+ 
+ 		cast_handle->totalNumDevices = deviceCount;
+ 	*ip_num_devices = deviceCount;
+@@ -124,12 +127,12 @@ int PT_DECLSPEC sndDevices_GetAll(PT_HANDLE* hp_sndDevices, int* ip_num_devices)
+ 
+ 	// First get the ID string for the current default playback device.
+ 	hr = pEnumerator->GetDefaultAudioEndpoint(eRender, eMultimedia, &pDefaultDevice);
+-	if (FAILED(hr)) SND_DEVICES_SET_STATUS_AND_RETURN_OK(SND_DEVICES_GET_AUDIOENDPOINT_FAILED);
++	if (FAILED(hr)) { hikariOnEnumerationFailure(4, hr); SND_DEVICES_SET_STATUS_AND_RETURN_OK(SND_DEVICES_GET_AUDIOENDPOINT_FAILED); };
+ 
+ 	if (pDefaultDevice != NULL)
+ 	{
+-		pDefaultDevice->GetId(&pwszIDdefault);
+-		if (FAILED(hr)) SND_DEVICES_SET_STATUS_AND_RETURN_OK(SND_DEVICES_GETID_FAILED);
++		hr = pDefaultDevice->GetId(&pwszIDdefault);
++		if (FAILED(hr)) { hikariOnEnumerationFailure(5, hr); SND_DEVICES_SET_STATUS_AND_RETURN_OK(SND_DEVICES_GETID_FAILED); };
+ 	}
+ 
+ 	// -------------------------------------------------------------------------
+@@ -144,6 +147,7 @@ int PT_DECLSPEC sndDevices_GetAll(PT_HANDLE* hp_sndDevices, int* ip_num_devices)
+ 		if (FAILED(hr))
+ 		{
+ 			CoTaskMemFree(pwszIDdefault);
++			hikariOnEnumerationFailure(6, hr);
+ 			SND_DEVICES_SET_STATUS_AND_RETURN_OK(SND_DEVICES_GET_INDEXED_DEVICE_FAILED);
+ 		}
+ 
+@@ -151,7 +155,7 @@ int PT_DECLSPEC sndDevices_GetAll(PT_HANDLE* hp_sndDevices, int* ip_num_devices)
+ 		LPWSTR pID = NULL;
+ 		cast_handle->pwszID[i][0] = L'\0';
+ 		hr = cast_handle->pAllDevices[i]->GetId(&pID);
+-		if (FAILED(hr)) SND_DEVICES_SET_STATUS_AND_RETURN_OK(SND_DEVICES_GETID_FAILED);
++		if (FAILED(hr)) { hikariOnEnumerationFailure(5, hr); SND_DEVICES_SET_STATUS_AND_RETURN_OK(SND_DEVICES_GETID_FAILED); };
+ 		wcscpy_s(cast_handle->pwszID[i], PT_MAX_GENERIC_STRLEN, pID);
+ 		CoTaskMemFree(pID);
+ 
+@@ -160,6 +164,7 @@ int PT_DECLSPEC sndDevices_GetAll(PT_HANDLE* hp_sndDevices, int* ip_num_devices)
+ 		if (FAILED(hr))
+ 		{
+ 			CoTaskMemFree(pwszIDdefault);
++			hikariOnEnumerationFailure(7, hr);
+ 			SND_DEVICES_SET_STATUS_AND_RETURN_OK(SND_DEVICES_INSTANCE_CREATE_FAILED);
+ 		}
+ 
+@@ -218,6 +223,7 @@ int PT_DECLSPEC sndDevices_GetAll(PT_HANDLE* hp_sndDevices, int* ip_num_devices)
+ 			// Get device number of channels.
+ 			if (sndDevicesGetFormatFromID(hp_sndDevices, cast_handle->pwszID[i], &wfx, &resultFlag) != OKAY)
+ 			{
++				hikariOnEnumerationFailure(8, 0);
+ 				CoTaskMemFree(pwszIDdefault);
+ 				PropVariantClear(&FriendlyName);
+ 				PropVariantClear(&DeviceDesc);
+@@ -238,6 +244,7 @@ int PT_DECLSPEC sndDevices_GetAll(PT_HANDLE* hp_sndDevices, int* ip_num_devices)
+ 			if (pstrCalcLocationOfStrInStr_Wide(cast_handle->deviceFriendlyName[i], SND_DEVICES_DFX_DEVICE_STRING,
+ 				0, &i_found_start_location, &i_found_dfx_string) != OKAY)
+ 			{
++				hikariOnEnumerationFailure(10, 0);
+ 				CoTaskMemFree(pwszIDdefault);
+ 				PropVariantClear(&FriendlyName);
+ 				PropVariantClear(&DeviceDesc);
+@@ -249,6 +256,7 @@ int PT_DECLSPEC sndDevices_GetAll(PT_HANDLE* hp_sndDevices, int* ip_num_devices)
+ 			hr = cast_handle->pAllDevices[i]->GetState(&cast_handle->deviceState[i]);
+ 			if (FAILED(hr))
+ 			{
++				hikariOnEnumerationFailure(9, hr);
+ 				CoTaskMemFree(pwszIDdefault);
+ 				PropVariantClear(&FriendlyName);
+ 				PropVariantClear(&DeviceDesc);
+diff --git a/audiopassthru/src/sndDevices/sndDevicesReInit.cpp b/audiopassthru/src/sndDevices/sndDevicesReInit.cpp
+index b2e45b6..514bbcd 100644
+--- a/audiopassthru/src/sndDevices/sndDevicesReInit.cpp
++++ b/audiopassthru/src/sndDevices/sndDevicesReInit.cpp
+@@ -1,3 +1,4 @@
++// Hikari modification 2026-10-08: isolated headless host integration; see MODIFICATIONS.md.
+ /*
+ FxSound
+ Copyright (C) 2025  FxSound LLC
+@@ -363,7 +364,7 @@ int PT_DECLSPEC sndCheckDeviceChanges(PT_HANDLE* hp_sndDevices, BOOL* bp_deviceC
+ 	if (FAILED(hr)) SND_DEVICES_SET_STATUS_AND_RETURN_OK(SND_DEVICES_INSTANCE_CREATE_FAILED)
+ 
+ 	// Enumerate all playback audio devices, "eRender" means look only for playback devices.
+-	hr = pEnumerator->EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE | DEVICE_STATE_UNPLUGGED, &pCollectionAllDevices);
++	hr = pEnumerator->EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE, &pCollectionAllDevices);
+ 	if (FAILED(hr)) SND_DEVICES_SET_STATUS_AND_RETURN_OK(SND_DEVICES_ENUMERATE_FAILED)
+ 
+ 	// Now get total number of playback devices

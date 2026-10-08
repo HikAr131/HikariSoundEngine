@@ -13,6 +13,7 @@
 #include "pipe_server.h"
 #include "dsp_adapter.h"
 #include "version.h"
+#include "startup_diagnostics.h"
 #include "AudioPassthru.h"
 #include <windows.h>
 #include <wtsapi32.h>
@@ -167,7 +168,8 @@ static bool restoreRecorded(const Json& state) {
 }
 class Engine {
 public:
-    explicit Engine(const RunOptions& options, std::vector<Endpoint> endpoints) : options_(options), storage_(options.dataDir), endpoints_(std::move(endpoints)) {
+    explicit Engine(const RunOptions& options, std::vector<Endpoint> endpoints, StartupDiagnostics& diagnostics) : options_(options), storage_(options.dataDir), endpoints_(std::move(endpoints)) {
+        diagnostics.step(StartupStep::savedState);
         instance_ = std::to_string(GetCurrentProcessId()) + "-" + processCreation(GetCurrentProcess());
         paused_ = GetSystemMetrics(SM_REMOTESESSION) != 0;
         auto previous = storage_.read("state.json");
@@ -183,11 +185,15 @@ public:
                 (!previous.contains("recoveryPending") || previous.at("recoveryPending").asBool());
             if (previousPending && requiresModeRecovery(previousPending, previous.at("noDefaultSwitch").asBool(), options_.noDefaultSwitch)) {
                 // Finish ownership under the previous mode before recording a fresh recovery snapshot.
+                diagnostics.step(StartupStep::recoveryRestore);
                 if (!restoreRecorded(previous)) throw std::runtime_error("Previous-mode recovery failed");
                 previous["cleanExit"] = true; previous["recoveryPending"] = false;
+                diagnostics.step(StartupStep::stateWrite);
                 storage_.writeState(previous);
+                diagnostics.step(StartupStep::outputRefresh);
                 endpoints_ = enumerateEndpoints();
             }
+            diagnostics.step(StartupStep::savedState);
             if (previous.contains("cleanExit") && !previous.at("cleanExit").asBool() &&
                 (!previous.contains("recoveryPending") || previous.at("recoveryPending").asBool())) {
                 restore_ = validatedRecoveryArray(previous.at("restore"), true);
@@ -196,6 +202,7 @@ public:
             }
         }
         if (!options_.outputId.empty()) { fixedId_ = options_.outputId; mode_ = "fixed"; }
+        diagnostics.step(StartupStep::outputVolume);
         for (const auto& e : endpoints_) {
             if (e.virtualDevice) virtualId_ = e.id;
             if (!e.virtualDevice && (e.consoleDefault || e.multimediaDefault)) {
@@ -209,6 +216,7 @@ public:
                 if (e.multimediaDefault) saveRole(eMultimedia);
             }
         }
+        diagnostics.step(StartupStep::savedState);
         auto hint = storage_.read("launch-hint.json");
         if (!hint.isNull()) {
             if (!hint.isObject()) throw std::runtime_error("Invalid launch hint");
@@ -227,24 +235,31 @@ public:
         }
         selectOutput();
         if (restore_.empty() && !outputId_.empty()) {
+            diagnostics.step(StartupStep::outputVolume);
             auto e = findEndpoint(outputId_);
             if (!e->volumeKnown) throw std::runtime_error("Original output volume could not be read");
             restore_.push_back(Json::object({{"role", eConsole}, {"id", utf8(e->id)}, {"volume", e->volume}, {"muted", e->muted}}));
         }
     }
     ~Engine() { shutdown(); }
-    void initialize() {
+    void initialize(StartupDiagnostics& diagnostics) {
         { std::lock_guard<std::mutex> lock(activeLogMutex); activeLog = &storage_; }
+        diagnostics.step(StartupStep::stateWrite);
         persist(false);
-        startGuardian();
+        startGuardian(diagnostics);
         guardianReady_ = true;
+        diagnostics.step(StartupStep::stateWrite);
         persist(false);
-        if (FAILED(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, IID_PPV_ARGS(&enumerator_)))) throw std::runtime_error("Audio notification setup failed");
+        diagnostics.step(StartupStep::notificationsCreate);
+        HRESULT notificationResult = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, IID_PPV_ARGS(&enumerator_));
+        if (FAILED(notificationResult)) throw StartupNativeError("Audio notification setup failed", static_cast<std::uint32_t>(notificationResult));
         notifications_.Attach(new Notifications());
-        if (FAILED(enumerator_->RegisterEndpointNotificationCallback(notifications_.Get()))) throw std::runtime_error("Audio notification setup failed");
+        diagnostics.step(StartupStep::notificationsRegister);
+        notificationResult = enumerator_->RegisterEndpointNotificationCallback(notifications_.Get());
+        if (FAILED(notificationResult)) throw StartupNativeError("Audio notification setup failed", static_cast<std::uint32_t>(notificationResult));
         registered_ = true;
         persistentNotifications = true;
-        startAudio();
+        startAudio(&diagnostics);
         storage_.log("Engine initialized");
     }
     Json dispatch(const Json& request) {
@@ -422,26 +437,33 @@ private:
         restoreOwnedState();
         try { persist(false); } catch (...) { quitting_ = true; }
     }
-    void startGuardian() {
+    void startGuardian(StartupDiagnostics& diagnostics) {
+        diagnostics.step(StartupStep::guardianEvent);
         PrivateSecurity security;
         auto name = L"Local\\Hikari1U.SoundEngine.GuardReady." + wide(instance_);
         Handle ready(CreateEventW(security.get(), TRUE, FALSE, name.c_str()));
-        if (!ready.get() || GetLastError() == ERROR_ALREADY_EXISTS) throw std::runtime_error("Guard handshake creation failed");
+        const auto eventError = GetLastError();
+        if (!ready.get() || eventError == ERROR_ALREADY_EXISTS) throw StartupNativeError("Guard handshake creation failed", eventError);
+        diagnostics.step(StartupStep::guardianLaunch);
         auto exe = executablePath();
         std::wstring command = quoteWindows(exe) + L" guard --pid " + std::to_wstring(GetCurrentProcessId()) + L" --creation " + wide(processCreation(GetCurrentProcess())) + L" --instance " + wide(instance_) + L" --data-dir " + quoteWindows(options_.dataDir.wstring());
         STARTUPINFOW startup{}; startup.cb = sizeof(startup); PROCESS_INFORMATION child{};
-        if (!CreateProcessW(exe.c_str(), command.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &startup, &child)) throw std::runtime_error("Guard launch failed");
+        if (!CreateProcessW(exe.c_str(), command.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &startup, &child)) throw StartupNativeError("Guard launch failed", GetLastError());
         Handle process(child.hProcess), thread(child.hThread);
-        if (WaitForSingleObject(ready.get(), 3000) != WAIT_OBJECT_0) throw std::runtime_error("Guard handshake timed out");
+        diagnostics.step(StartupStep::guardianWait);
+        const auto waited = WaitForSingleObject(ready.get(), 3000);
+        if (waited != WAIT_OBJECT_0) throw StartupNativeError("Guard handshake timed out", waited == WAIT_FAILED ? GetLastError() : waited);
     }
-    void startAudio() {
+    void startAudio(StartupDiagnostics* diagnostics = nullptr) {
+        auto step = [&](StartupStep value) { if (diagnostics) diagnostics->step(value); };
+        step(StartupStep::audioInitialize);
         if (state_ == "yielded" || state_ == "conflict-official-fxsound") return;
         if (paused_) {
             stopAudio(); state_ = "idle-no-device";
             const bool restored = restoreOwnedState();
             if (!restored) lastError_ = error("INTERNAL", "Paused recovery could not be completed");
             persist(false);
-            if (!restored) throw std::runtime_error("Paused recovery failed");
+            if (!restored) { step(StartupStep::recoveryRestore); throw std::runtime_error("Paused recovery failed"); }
             return;
         }
         if (officialFxSoundRunning()) {
@@ -453,7 +475,7 @@ private:
             stopAudio(); state_ = "idle-no-device"; lastError_ = error(code, message);
             restoreOwnedState(); persist(false);
         };
-        if (!recoveryPending_) { endpoints_ = enumerateEndpoints(); selectOutput(); }
+        if (!recoveryPending_) { step(StartupStep::outputRefresh); endpoints_ = enumerateEndpoints(); selectOutput(); }
         unsigned virtualCount = 0;
         std::wstring capture;
         for (const auto& endpoint : endpoints_) if (endpoint.virtualDevice) { ++virtualCount; capture = endpoint.id; }
@@ -461,14 +483,17 @@ private:
         if (virtualId_.empty()) { inactive(virtualCount ? "DEFAULT_DEVICE_CONFLICT" : "VIRTUAL_DEVICE_MISSING", "Virtual capture endpoint is unavailable"); return; }
         if (outputId_.empty()) { inactive("NO_OUTPUT_DEVICE", "Output endpoint is unavailable"); return; }
         try {
+        step(StartupStep::outputEndpoint);
         auto output = findEndpoint(outputId_);
         if (!output || output->virtualDevice) throw std::runtime_error("Output unavailable");
+        step(StartupStep::outputVolume);
         if (!output->volumeKnown) throw std::runtime_error("Output volume could not be read");
         static const unsigned rates[] = {44100, 48000, 88200, 96000, 176400, 192000};
         if (!output->formatSupported || (output->channels != 2 && output->channels != 4 && output->channels != 6 && output->channels != 8) || std::find(std::begin(rates), std::end(rates), output->sampleRate) == std::end(rates)) {
             inactive("DEVICE_FORMAT_UNSUPPORTED", "Output format is unsupported"); return;
         }
         if (!recoveryPending_) {
+            step(StartupStep::recoverySnapshot);
             std::vector<RecoveryRecord> fallbackRoles;
             for (const auto& record : restore_) fallbackRoles.push_back({static_cast<unsigned>(record.at("role").asNumber()),
                 wide(record.at("id").asString()), static_cast<float>(record.at("volume").asNumber()), record.at("muted").asBool()});
@@ -483,19 +508,27 @@ private:
         if (!captured) outputVolumes_.push_back(Json::object({{"id", utf8(outputId_)}, {"volume", output->volume}, {"muted", output->muted}}));
         // Commit recovery evidence before any upstream device or volume mutation.
         recoveryPending_ = true;
+        step(StartupStep::recoveryWrite);
         persist(false);
         { std::lock_guard<std::mutex> lock(preferredOutputMutex); preferredOutput = outputId_; }
-        auto dsp = std::make_unique<DspAdapter>(); dsp->apply(parameters_);
+        step(StartupStep::dspCreate);
+        auto dsp = std::make_unique<DspAdapter>();
+        step(StartupStep::dspApply);
+        dsp->apply(parameters_);
+        step(StartupStep::dspFormat);
         dsp->prepareFormat(output->sampleRate % 48000 == 0 ? 48000 : 44100, output->channels);
         allowUpstreamSwitch = !options_.noDefaultSwitch;
         // Upstream init already runs a reinit, so its playback reports must count for this session.
         playbackInitSeen_ = playbackInitializeSequence(); outputRecovery_.reset(); outputInitialized_ = false;
+        step(StartupStep::audioInitialize);
         auto audio = std::make_unique<AudioPassthru>();
         if (audio->init() != 0) throw std::runtime_error("Upstream initialization failed");
         audio->setDspProcessingModule(dsp->upstream());
+        step(StartupStep::outputSelection);
         bool selected = false;
         for (const auto& device : audio->getSoundDevices()) if (device.pwszID == outputId_ && device.isRealDevice) { selected = true; break; }
         if (!selected) throw std::runtime_error("Upstream output selection failed");
+        step(StartupStep::bufferInitialize);
         if (audio->setBufferLength(bufferMs_) != 0) throw std::runtime_error("Buffer initialization failed");
         audio_ = std::move(audio); dsp_ = std::move(dsp);
         outputChannels_ = output->channels; outputRate_ = output->sampleRate;
@@ -585,12 +618,17 @@ int runEngine(const RunOptions& options) {
         if (chosen == endpoints.end()) { outputLine(error("DEVICE_FORMAT_UNSUPPORTED", "Capture endpoint must be the virtual audio endpoint")); return 2; }
     }
     if (officialFxSoundRunning()) { auto e = error("OFFICIAL_FXSOUND_RUNNING", "Official FxSound is running"); e["state"] = "conflict-official-fxsound"; outputLine(e); return 2; }
+    Storage startupLog(options.dataDir);
+    StartupDiagnostics diagnostics([&](const std::string& line) { startupLog.log(line); });
+    StartupEnumerationScope enumerationScope(diagnostics);
+    try {
     PrivateSecurity security;
     Handle owner(CreateMutexW(security.get(), FALSE, runMutexName));
-    if (!owner.get()) throw std::runtime_error("Instance ownership failed");
+    if (!owner.get()) throw StartupNativeError("Instance ownership failed", GetLastError());
     DWORD acquired = WaitForSingleObject(owner.get(), 5000);
     if (acquired != WAIT_OBJECT_0 && acquired != WAIT_ABANDONED) { outputLine(error("DEFAULT_DEVICE_CONFLICT", "An engine instance is already running")); return 2; }
     struct Release { HANDLE handle; ~Release() { ReleaseMutex(handle); } } release{owner.get()};
+    diagnostics.step(StartupStep::outputRefresh);
     endpoints = enumerateEndpoints();
     virtualCount = std::count_if(endpoints.begin(), endpoints.end(), [](const Endpoint& e) { return e.virtualDevice; });
     if (virtualCount != 1) { outputLine(error(virtualCount ? "DEFAULT_DEVICE_CONFLICT" : "VIRTUAL_DEVICE_MISSING", "Virtual audio endpoint is unavailable")); return 2; }
@@ -598,11 +636,13 @@ int runEngine(const RunOptions& options) {
         outputLine(error("DEVICE_FORMAT_UNSUPPORTED", "Capture endpoint must be the virtual audio endpoint")); return 2;
     }
     if (officialFxSoundRunning()) { auto e = error("OFFICIAL_FXSOUND_RUNNING", "Official FxSound is running"); e["state"] = "conflict-official-fxsound"; outputLine(e); return 2; }
+    diagnostics.step(StartupStep::stopEvent);
     Handle event(CreateEventW(security.get(), TRUE, FALSE, stopEventName));
-    if (!event.get()) throw std::runtime_error("Stop event failed"); ResetEvent(event.get());
-    Engine engine(options, std::move(endpoints));
+    if (!event.get()) throw StartupNativeError("Stop event failed", GetLastError()); ResetEvent(event.get());
+    Engine engine(options, std::move(endpoints), diagnostics);
     std::mutex queueMutex; std::deque<std::shared_ptr<Pending>> queue;
     std::atomic<bool> stop{false};
+    diagnostics.step(StartupStep::pipe);
     PipeServer pipe([&](const Json& request) {
         auto pending = std::make_shared<Pending>(); pending->request = request;
         auto result = pending->result.get_future();
@@ -622,14 +662,17 @@ int runEngine(const RunOptions& options) {
     } queueCloser{[&] { stop = true; rejectQueued(); }};
     // Pipe-name reservation must succeed before taking over a default endpoint.
     pipe.start();
-    engine.initialize();
+    engine.initialize(diagnostics);
+    diagnostics.step(StartupStep::sessionClass);
     WNDCLASSW cls{}; cls.lpfnWndProc = windowProcedure; cls.hInstance = GetModuleHandleW(nullptr); cls.lpszClassName = L"HikariSoundEngine.Session";
-    if (!RegisterClassW(&cls)) throw std::runtime_error("Session window registration failed");
+    if (!RegisterClassW(&cls)) throw StartupNativeError("Session window registration failed", GetLastError());
     WindowContext context{&engine, &stop};
     if (GetSystemMetrics(SM_REMOTESESSION)) context.pauses.set(PauseReasons::remote, true);
+    diagnostics.step(StartupStep::sessionWindow);
     HWND window = CreateWindowExW(0, cls.lpszClassName, L"HikariSoundEngine", WS_OVERLAPPED, 0, 0, 0, 0, nullptr, nullptr, cls.hInstance, &context);
-    if (!window) throw std::runtime_error("Session window creation failed");
+    if (!window) throw StartupNativeError("Session window creation failed", GetLastError());
     WTSRegisterSessionNotification(window, NOTIFY_FOR_THIS_SESSION);
+    diagnostics.complete();
     auto previous = std::string();
     try {
         while (!stop && !engine.quitting() && WaitForSingleObject(event.get(), 0) != WAIT_OBJECT_0) {
@@ -654,6 +697,7 @@ int runEngine(const RunOptions& options) {
     if (engine.quitting()) Sleep(100);
     pipe.stop(); WTSUnRegisterSessionNotification(window); DestroyWindow(window);
     return 0;
+    } catch (...) { diagnostics.report(); throw; }
 }
 static bool savedOwnerAlive(const Json& state) {
     const auto pidValue = state.at("pid").asNumber();

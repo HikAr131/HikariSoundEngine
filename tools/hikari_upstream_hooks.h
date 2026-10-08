@@ -11,6 +11,8 @@ void hikariOnDefaultDeviceChanged(int, int, const wchar_t*);
 bool hikariGetPreferredOutput(wchar_t* buffer, int capacity);
 bool hikariValidateAudioInitialization(const WAVEFORMATEX*, const WAVEFORMATEX*) noexcept;
 void hikariOnPlaybackInitializeResult(HRESULT hr) noexcept;
+void hikariBeginEnumeration() noexcept;
+void hikariOnEnumerationFailure(int step, HRESULT result) noexcept;
 LSTATUS WINAPI hikariRegCreateKeyExW(HKEY, LPCWSTR, DWORD, LPWSTR, DWORD, REGSAM,
     const LPSECURITY_ATTRIBUTES, PHKEY, LPDWORD);
 LSTATUS WINAPI hikariRegOpenKeyExW(HKEY, LPCWSTR, DWORD, REGSAM, PHKEY);

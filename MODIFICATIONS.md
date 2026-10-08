@@ -4,6 +4,19 @@ Hikari modifications dated 2026-10-04 are applied to a build copy of FxSound app
 `d8e7a23d37ed5939c2a3090a1c1756c7f2500b17`. The pinned submodule remains unchanged.
 Every modified upstream file begins with a dated modification statement.
 
+`patches/02-active-endpoint-enumeration.patch` adds the 2026-10-08 host boundary:
+device enumeration and change monitoring both list only ACTIVE endpoints, matching
+the host's playable endpoint list. An unplugged endpoint whose property store
+fails cannot erase healthy active output classification. ACTIVE endpoint failures
+still leave no classified output for the host to select. Existing endpoint state
+callbacks and subsequent enumeration retain connection/disconnection detection.
+GetAll failure exits report fixed step identifiers and available HRESULT values
+to a temporary host startup diagnostic scope; no endpoint identity or free text
+crosses this boundary. The default endpoint GetId HRESULT is assigned before its
+existing failure check. Offline fixtures compile the real patched GetAll body and
+replace COM creation and format lookup with synthetic endpoints, without opening
+an audio device. This is source-level failure reproduction, not field-device proof.
+
 `patches/01-headless-host.patch` changes only the following integration boundaries:
 
 | Files | Modification and purpose |

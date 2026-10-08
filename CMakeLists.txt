@@ -41,11 +41,14 @@ target_compile_definitions(fxsound_dsp PRIVATE PT_NON_MFC DSPSOFT_TARGET PT_DSP_
 upstream_library(fxsound_audio "${UPSTREAM}/audiopassthru/audiopassthru.vcxproj")
 
 file(GLOB HOST_SOURCES CONFIGURE_DEPENDS "src/*.cpp" "tests/*.cpp")
+set_source_files_properties(tests/upstream_enumeration_failure_tests.cpp PROPERTIES
+  COMPILE_OPTIONS "/Zc:strictStrings-;/wd4100;/wd4189;/wd4996")
 add_executable(HikariSoundEngine WIN32 ${HOST_SOURCES} src/version.rc app.manifest)
 target_compile_options(HikariSoundEngine PRIVATE /Brepro /utf-8 /W4 /permissive- /EHsc)
 target_compile_definitions(HikariSoundEngine PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 target_include_directories(HikariSoundEngine PRIVATE src tools
-  "${UPSTREAM}/dsp/include" "${UPSTREAM}/audiopassthru/include")
+  "${UPSTREAM}/dsp/include" "${UPSTREAM}/audiopassthru/include"
+  "${UPSTREAM}/audiopassthru/src/sndDevices")
 target_link_libraries(HikariSoundEngine PRIVATE fxsound_audio fxsound_dsp
   ole32 oleaut32 uuid avrt winmm advapi32 propsys shell32 shlwapi user32 wtsapi32 bcrypt cfgmgr32 delayimp)
 # Static imports stay KnownDLLs; the rest load lazily after main restricts the DLL search to System32.

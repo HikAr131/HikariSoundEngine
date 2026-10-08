@@ -20,6 +20,15 @@ function mutate(file, transform) {
   } finally { fs.writeFileSync(file, original); fs.utimesSync(file, new Date(), new Date()); }
 }
 for (const match of patch.matchAll(/^\+\+\+ b\/(.+)$/gm)) mutate(path.join(root, 'build/upstream', match[1]), value => value.replace('// Hikari modification 2026-10-04:', '// Removed modification notice:'));
+const enumerationPath = path.join(root, 'build/upstream/audiopassthru/src/sndDevices/sndDevices_GetAll.cpp');
+const monitoringPath = path.join(root, 'build/upstream/audiopassthru/src/sndDevices/sndDevicesReInit.cpp');
+for (const file of [enumerationPath, monitoringPath]) {
+  mutate(file, value => value.replace('// Hikari modification 2026-10-08:', '// Removed modification notice:'));
+  mutate(file, value => value.replace('EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE,', 'EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE | DEVICE_STATE_UNPLUGGED,'));
+}
+mutate(enumerationPath, value => value.replace('hr = pDefaultDevice->GetId(&pwszIDdefault);', 'pDefaultDevice->GetId(&pwszIDdefault);'));
+mutate(enumerationPath, value => value.replace('hikariBeginEnumeration();', ''));
+for (let step = 1; step <= 10; ++step) mutate(enumerationPath, value => value.replace(`hikariOnEnumerationFailure(${step}, ${step === 8 || step === 10 ? '0' : 'hr'});`, ''));
 mutate(path.join(root, 'build/upstream/audiopassthru/src/AudioPassthru/AudioPassthruPrivate.cpp'), value => value.replace('hikariProcessAudio(p_dfx_dsp_', 'removedProcessAudio(p_dfx_dsp_'));
 mutate(path.join(root, 'build/upstream/audiopassthru/src/sndDevices/sndDevicesSet.cpp'), value => value.replace('if (!hikariAllowDefaultSwitch(cast_handle->pwszID[device_index_num])) return OKAY;', 'if (false) return OKAY;'));
 const setupPath = path.join(root, 'build/upstream/audiopassthru/src/sndDevices/sndDevicesSetupDevices.cpp');

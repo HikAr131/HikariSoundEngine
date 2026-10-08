@@ -20,6 +20,7 @@
 #include "output_recovery.h"
 #include "parameter_json.h"
 #include "version.h"
+#include "startup_diagnostics.h"
 #include <fstream>
 #include <filesystem>
 #include <string>
@@ -27,7 +28,7 @@
 #include <stdexcept>
 
 void runProtocolTests();
-namespace hikari { void runLifecycleTests(); void runStorageTests(); void runHostTests(); }
+namespace hikari { void runLifecycleTests(); void runStorageTests(); void runHostTests(); void runUpstreamEnumerationFailureTests(); }
 static void printJson(const hikari::Json& value) {
     auto text = value.stringify() + "\n"; DWORD written;
     auto output = GetStdHandle(STD_OUTPUT_HANDLE);
@@ -77,6 +78,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int) {
         if (command == L"--test-child") { Sleep(100); return 7; }
         if (command == L"--self-test") {
             auto test = [](const char* name, void (*run)()) { printJson(hikari::Json::object({{"test", name}, {"state", "running"}})); run(); };
+            test("startup-diagnostics", hikari::runStartupDiagnosticsTests);
+            test("upstream-enumeration-failure", hikari::runUpstreamEnumerationFailureTests);
             test("protocol", runProtocolTests); test("parametric", hikari::runEqTests); test("graphic", hikari::runGraphicTests);
             test("lifecycle", hikari::runLifecycleTests); test("storage", hikari::runStorageTests); test("host", hikari::runHostTests);
             test("audio-format", hikari::runAudioFormatTests); test("audio-identity", hikari::runAudioIdentityTests);
