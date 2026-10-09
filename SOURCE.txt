@@ -1,8 +1,8 @@
-HikariSoundEngine 1.0.2
+HikariSoundEngine 1.0.3
 License: AGPL-3.0-or-later
 Public source repository: https://github.com/HikAr131/HikariSoundEngine
-Corresponding source for this version: tag v1.0.2, Release https://github.com/HikAr131/HikariSoundEngine/releases/tag/v1.0.2 with HikariSoundEngine-source.zip attached.
-Earlier versions: 1.0.1 is tag v1.0.1, Release https://github.com/HikAr131/HikariSoundEngine/releases/tag/v1.0.1; 1.0.0 is tag v1.0.0, Release https://github.com/HikAr131/HikariSoundEngine/releases/tag/v1.0.0.
+Corresponding source for this version: tag v1.0.3, Release https://github.com/HikAr131/HikariSoundEngine/releases/tag/v1.0.3 with HikariSoundEngine-source.zip attached.
+Earlier versions: 1.0.2 is tag v1.0.2, Release https://github.com/HikAr131/HikariSoundEngine/releases/tag/v1.0.2; 1.0.1 is tag v1.0.1, Release https://github.com/HikAr131/HikariSoundEngine/releases/tag/v1.0.1; 1.0.0 is tag v1.0.0, Release https://github.com/HikAr131/HikariSoundEngine/releases/tag/v1.0.0.
 Do not redistribute a binary before its corresponding source is publicly available.
 Upstream application source: https://github.com/fxsound2/fxsound-app/tree/d8e7a23d37ed5939c2a3090a1c1756c7f2500b17
 Upstream driver source reference: https://github.com/fxsound2/fxsound-driver/tree/c78fc6d031d16bd0a5dbbdff4871cfb8715d343d

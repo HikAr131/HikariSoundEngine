@@ -2,6 +2,23 @@
 
 這份報告不把離線自測當成音訊裝置、驅動或遊戲驗證；所有驗證都沒有安裝驅動、切換預設裝置、向實體裝置播放測試音或建立啟動項。A4 量測仍保留待測。
 
+## 1.0.3（2026-10-09）
+
+1U 2.8.1／2.8.2 的現場診斷顯示，1.0.2 在多台電腦（Windows 10 19045 到 Windows 11 26300）上被 1U 啟動後不到兩秒就自行結束；日誌只有 `Clean shutdown`、沒有 `Engine initialized`，1U 的八秒等待因而以 `SOUND_ENGINE_NOT_RUNNING` 收場，自動重試與重開機都一樣。1.0.2 不記錄初始化在哪一步失敗，所以真因還判不出來。1.0.3 包含提交 `dad0767` 的兩件事：
+
+- 上游第二個補丁（`patches/02-active-endpoint-enumeration.patch`）讓播放端點列舉與裝置變化輪詢只看作用中的端點，拔掉的端點讀不到屬性時不再讓整份輸出清單失敗；預設端點 `GetId` 改為檢查它自己的結果。這是頭號嫌疑的修正，尚未在現場證實就是真因。
+- 初始化失敗時以 34 組固定的階段與代碼加有界的系統錯誤碼寫一行 `Startup failure <stage> <CODE> 0x…`，不記任意例外文字與私人路徑；1U 2.8.2 起的音效診斷會收這一行。
+
+發布前另對「拔掉的端點」這個假設做了一輪獨立的找反證審查：它列出 GetAll 以外仍可在 `Engine initialized` 之前退出的路徑（管道建立、守護程式、裝置通知、狀態寫入、上游輸出選擇等），新記錄都會標出階段；只有上游以名稱判讀裝置那段失敗時，記錄停在 `OUTPUT_SELECTION_FAILED` 而沒有原始 HRESULT。審查沒有找到 1.0.3 在正常輸入下會出錯的地方。
+
+實跑證據（2026-10-09，開發機，未安裝驅動、未碰真實音訊裝置）：
+
+- `node tools/audit-source.mjs` 通過（84 個檔案）；建置腳本套用補丁後 `node tools/verify-upstream.mjs` 通過，`node tools/verify-upstream.mutations.mjs` 58 項變異全被拒、原檔還原；`node --test tools/source-archive-policy.test.mjs` 5 項通過。
+- 連續兩次 `build.ps1 -Clean` 都退出 0，離線自測通過（`audioDevicesTouched:false`），`node tools/verify-distribution.mjs` 回報 `cleanBuildsIdentical:true`。執行檔未簽章 1,311,744 bytes，SHA256 `e495ec054456fd22c53b27e813dde9a88057bb9f0480a496d9f5884b6f60e6ce`；簽章後雜湊會變。`--version` 回報 `1.0.3`、protocol 1。
+- 三個驅動檔與 1.0.2 位元組相同，`fxvad.inf` 與 `fxvad.sys` 仍由簽章目錄核對通過。
+
+真實音訊、驅動與啟動仍要在虛擬機或內測機驗收；1.0.3 是否修好啟動失敗，以下一批現場日誌是否還出現 `Startup failure`、出現在哪一步為準。
+
 ## 1.0.2 修正（2026-10-05）
 
 1.0.1 散布的 `fxvad.inf` 是上游倉庫裡的 LF 版，但微軟簽章目錄收錄的是同一內容的 CRLF 版。Windows 因此把整個驅動套件判為未簽章，1U 以非互動方式安裝時一律被拒，內測回報兩台 Win11 都裝不上虛擬聲卡。1.0.2 的程式與 1.0.1 相同，只改兩件事：
