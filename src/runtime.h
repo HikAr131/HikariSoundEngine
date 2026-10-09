@@ -11,6 +11,9 @@ struct RunOptions {
     std::wstring outputId;
     bool noDefaultSwitch = false;
 };
+struct Endpoint;
+// Recovery role records for a start that found no real default (console and multimedia, both to this device).
+Json::Array fallbackRoleRecords(const Endpoint& endpoint);
 int runEngine(const RunOptions& options);
 int runGuard(const RunOptions& options, unsigned long pid, const std::string& creation, const std::string& instance);
 Json probeDevices();

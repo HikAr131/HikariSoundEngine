@@ -8,12 +8,12 @@
 
 - 修正：兩處改成 `static_cast<unsigned>(eConsole)`；`Json` 另以刪除的建構子拒收任何列舉值，同類寫法會在編譯時失敗。先只加這道檢查而不修程式時，兩處都編譯失敗（MSVC C2280，一次回報一處），證明檢查打得到；生命週期自測另以 `static_assert` 鎖住「列舉不能直接變成 Json」，並核對主控台角色記錄寫出再讀回是數字。
 - 診斷時曾假設是「預設裝置音量讀不到」並寫了重試與略過，找反證審查指出上述型別錯誤，獨立小程式實測 `Json::object({{"role", eConsole}})` 輸出 `{"role":false}`、讀取拋 `Expected number`；該重試與略過沒有發布，只留在 `archive/recovery-volume-tolerance` 作紀錄。
-- 這條路徑以前從未成功跑過；現在會記下主控台角色，多媒體角色沿用原本行為（只有在建構時是實體預設才記），1U 在停用節點前會把仍留在虛擬聲卡的角色交還實體裝置。
+- 這條路徑以前從未成功跑過，修好後原本只記主控台角色；使用者 10-09 定一併記多媒體角色：`fallbackRoleRecords` 同時寫主控台與多媒體兩筆，退出時兩個角色都還原到開啟前那台。自測以實際函式產生的兩筆記錄跑快照，兩個角色都選到那台裝置；只留主控台時自測失敗（`Lifecycle test failed`）。1U 2.8.3 另在停用節點前把仍留在虛擬聲卡的角色交還實體裝置。
 
 實跑證據（2026-10-09，開發機，未安裝驅動、未碰真實音訊裝置）：
 
 - `node tools/audit-source.mjs` 通過（84 個檔案）；建置腳本套用補丁後 `node tools/verify-upstream.mjs` 通過，`node tools/verify-upstream.mutations.mjs` 58 項變異全被拒、原檔還原；`node --test tools/source-archive-policy.test.mjs` 5 項通過。
-- 連續兩次 `build.ps1 -Clean` 都退出 0，離線自測通過（`audioDevicesTouched:false`），`node tools/verify-distribution.mjs` 回報 `cleanBuildsIdentical:true`。執行檔未簽章 1,312,256 bytes，SHA256 `768f40708d25651f6c2a00cf9fc4f99900b0c58a5524d897318b38ad2796d5e7`；簽章後雜湊會變。`--version` 回報 `1.0.4`、protocol 1。
+- 連續兩次 `build.ps1 -Clean` 都退出 0，離線自測通過（`audioDevicesTouched:false`），`node tools/verify-distribution.mjs` 回報 `cleanBuildsIdentical:true`。執行檔未簽章 1,313,792 bytes，SHA256 `538b678211e6b31216afea9e55525e88bf0c4441a27316c4857eb51c1f4ae98f`；簽章後雜湊會變。`--version` 回報 `1.0.4`、protocol 1。
 - 三個驅動檔與 1.0.3 位元組相同，`fxvad.inf` 與 `fxvad.sys` 仍由簽章目錄核對通過。
 
 真實音訊、驅動與啟動仍要在虛擬機或內測機驗收；1.0.4 是否修好這批啟動失敗，以現場日誌是否還出現 `recovery RECOVERY_SNAPSHOT_FAILED` 為準。

@@ -80,6 +80,14 @@ Json probeDevices() {
     for (const auto& e : enumerateEndpoints()) list.push_back(endpointJson(e));
     return Json::object({{"ok", true}, {"devices", list}, {"consoleDefault", utf8(defaultEndpoint(eConsole))}, {"multimediaDefault", utf8(defaultEndpoint(eMultimedia))}, {"communicationsDefault", utf8(defaultEndpoint(eCommunications))}});
 }
+// With no real default left to read when the engine starts, both media roles go back to the one device known from
+// before the virtual card took the default: the launch hint's device, or the chosen output.
+Json::Array fallbackRoleRecords(const Endpoint& e) {
+    Json::Array records;
+    for (unsigned role : {static_cast<unsigned>(eConsole), static_cast<unsigned>(eMultimedia)})
+        records.push_back(Json::object({{"role", role}, {"id", utf8(e.id)}, {"volume", e.volume}, {"muted", e.muted}}));
+    return records;
+}
 static Json error(const char* code, const char* message) {
     return Json::object({{"ok", false}, {"code", code}, {"message", message}});
 }
@@ -228,7 +236,7 @@ public:
                     auto found = findEndpoint(id);
                     if (found && !found->virtualDevice && found->volumeKnown) {
                         remember(id);
-                        if (restore_.empty()) restore_.push_back(Json::object({{"role", static_cast<unsigned>(eConsole)}, {"id", utf8(id)}, {"volume", found->volume}, {"muted", found->muted}}));
+                        if (restore_.empty()) restore_ = fallbackRoleRecords(*found);
                     }
                 }
             }
@@ -238,7 +246,7 @@ public:
             diagnostics.step(StartupStep::outputVolume);
             auto e = findEndpoint(outputId_);
             if (!e->volumeKnown) throw std::runtime_error("Original output volume could not be read");
-            restore_.push_back(Json::object({{"role", static_cast<unsigned>(eConsole)}, {"id", utf8(e->id)}, {"volume", e->volume}, {"muted", e->muted}}));
+            restore_ = fallbackRoleRecords(*e);
         }
     }
     ~Engine() { shutdown(); }

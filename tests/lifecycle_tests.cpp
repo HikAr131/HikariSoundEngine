@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Hikari
 #include "lifecycle.h"
+#include "audio_platform.h"
 #include "json.h"
+#include "runtime.h"
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
@@ -96,9 +98,19 @@ void runLifecycleTests() {
         {L"virtual", true, true, true, 1.0f, false, true}, {L"a", false, false, false, 0.8f, false, true}}, L"a", oldRoles);
     check(hinted.roles[0].id == L"a" && std::abs(hinted.roles[0].volume - 0.8f) < 0.00001f);
     check(launchHintFresh(1000, 61000)); check(!launchHintFresh(1000, 61001)); check(!launchHintFresh(1001, 1000));
-    // A console role record built the way the constructor builds it reads back as a number.
-    const auto consoleRole = Json::object({{"role", static_cast<unsigned>(eConsole)}, {"id", "a"}, {"volume", 0.5f}, {"muted", false}});
-    check(Json::parse(consoleRole.stringify()).at("role").asNumber() == eConsole);
+    // The constructor's records for a start that found the virtual card holding both defaults: both media roles, as
+    // numbers, to the device known from before; the snapshot then records both roles from them.
+    Endpoint speakers; speakers.id = L"speakers"; speakers.volume = 0.4f; speakers.muted = true; speakers.volumeKnown = true;
+    std::vector<RecoveryRecord> fallback;
+    for (const auto& record : fallbackRoleRecords(speakers)) {
+        const auto saved = Json::parse(record.stringify());
+        fallback.push_back({static_cast<unsigned>(saved.at("role").asNumber()), wide(saved.at("id").asString()),
+            static_cast<float>(saved.at("volume").asNumber()), saved.at("muted").asBool()});
+    }
+    check(fallback.size() == 2 && fallback[0].role == eConsole && fallback[1].role == eMultimedia && fallback[1].muted);
+    const auto fromFallback = freshRecoverySnapshot(std::vector<EndpointFixture>{
+        {L"virtual", true, true, true, 1.0f, false, true}, {L"speakers", false, false, false, 0.4f, true, true}}, L"speakers", fallback);
+    check(fromFallback.roles.size() == 2 && fromFallback.roles[0].id == L"speakers" && fromFallback.roles[1].id == L"speakers");
     check(chooseOutput({L"a", L"b"}, {L"gone", L"b"}, {}) == L"b");
     check(chooseOutput({L"a"}, {L"b", L"a"}, L"b").empty());
     check(chooseOutput({L"a", L"b"}, {L"b", L"a"}, L"a") == L"a");
