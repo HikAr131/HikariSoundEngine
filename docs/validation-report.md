@@ -2,6 +2,22 @@
 
 這份報告不把離線自測當成音訊裝置、驅動或遊戲驗證；所有驗證都沒有安裝驅動、切換預設裝置、向實體裝置播放測試音或建立啟動項。A4 量測仍保留待測。
 
+## 1.0.4（2026-10-09）
+
+1.0.3 上線當天，1U 2.8.2 回來三台（Windows 10 19045 兩台、Windows 11 22631 一台，三種不同的播放裝置）的音效診斷，每次開啟都在同一步結束，日誌是 `Clean shutdown` 之後緊接 `Startup failure recovery RECOVERY_SNAPSHOT_FAILED 0x00000000`。原因是建構子的兩處備援角色記錄：1U 啟用虛擬聲卡後，Windows 常把預設播放裝置自動切到虛擬聲卡，引擎此時找不到實體預設，就用 launch hint 或所選輸出補一筆主控台角色，寫法是 `{"role", eConsole}`。`Json` 的數字建構只收算術型別，列舉於是轉成 `bool`，存成 `"role": false`；啟動走到建立還原快照時以 `asNumber()` 讀回，拋出 `Expected number`，每次都停在這一步。1.0.0 到 1.0.3 都有這兩行。
+
+- 修正：兩處改成 `static_cast<unsigned>(eConsole)`；`Json` 另以刪除的建構子拒收任何列舉值，同類寫法會在編譯時失敗。先只加這道檢查而不修程式時，兩處都編譯失敗（MSVC C2280，一次回報一處），證明檢查打得到；生命週期自測另以 `static_assert` 鎖住「列舉不能直接變成 Json」，並核對主控台角色記錄寫出再讀回是數字。
+- 診斷時曾假設是「預設裝置音量讀不到」並寫了重試與略過，找反證審查指出上述型別錯誤，獨立小程式實測 `Json::object({{"role", eConsole}})` 輸出 `{"role":false}`、讀取拋 `Expected number`；該重試與略過沒有發布，只留在 `archive/recovery-volume-tolerance` 作紀錄。
+- 這條路徑以前從未成功跑過；現在會記下主控台角色，多媒體角色沿用原本行為（只有在建構時是實體預設才記），1U 在停用節點前會把仍留在虛擬聲卡的角色交還實體裝置。
+
+實跑證據（2026-10-09，開發機，未安裝驅動、未碰真實音訊裝置）：
+
+- `node tools/audit-source.mjs` 通過（84 個檔案）；建置腳本套用補丁後 `node tools/verify-upstream.mjs` 通過，`node tools/verify-upstream.mutations.mjs` 58 項變異全被拒、原檔還原；`node --test tools/source-archive-policy.test.mjs` 5 項通過。
+- 連續兩次 `build.ps1 -Clean` 都退出 0，離線自測通過（`audioDevicesTouched:false`），`node tools/verify-distribution.mjs` 回報 `cleanBuildsIdentical:true`。執行檔未簽章 1,312,256 bytes，SHA256 `768f40708d25651f6c2a00cf9fc4f99900b0c58a5524d897318b38ad2796d5e7`；簽章後雜湊會變。`--version` 回報 `1.0.4`、protocol 1。
+- 三個驅動檔與 1.0.3 位元組相同，`fxvad.inf` 與 `fxvad.sys` 仍由簽章目錄核對通過。
+
+真實音訊、驅動與啟動仍要在虛擬機或內測機驗收；1.0.4 是否修好這批啟動失敗，以現場日誌是否還出現 `recovery RECOVERY_SNAPSHOT_FAILED` 為準。
+
 ## 1.0.3（2026-10-09）
 
 1U 2.8.1／2.8.2 的現場診斷顯示，1.0.2 在多台電腦（Windows 10 19045 到 Windows 11 26300）上被 1U 啟動後不到兩秒就自行結束；日誌只有 `Clean shutdown`、沒有 `Engine initialized`，1U 的八秒等待因而以 `SOUND_ENGINE_NOT_RUNNING` 收場，自動重試與重開機都一樣。1.0.2 不記錄初始化在哪一步失敗，所以真因還判不出來。1.0.3 包含提交 `dad0767` 的兩件事：

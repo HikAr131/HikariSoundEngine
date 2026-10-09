@@ -1,9 +1,20 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (C) 2026 Hikari
 #include "lifecycle.h"
+#include "json.h"
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <mmdeviceapi.h>
 #include <stdexcept>
+#include <type_traits>
 
 namespace hikari {
+// 282/3, 282/4: the constructor's fallback role records stored eConsole as false, so every start that found the
+// virtual card already holding the default threw at the recovery snapshot. An enum must become a number first.
+static_assert(!std::is_constructible_v<Json, ERole>, "an ERole must be converted to a number before it becomes Json");
+static_assert(std::is_constructible_v<Json, unsigned>, "role numbers stay storable");
 void runLifecycleTests() {
     auto check = [](bool value) { if (!value) throw std::runtime_error("Lifecycle test failed"); };
     PauseReasons pauses;
@@ -85,6 +96,9 @@ void runLifecycleTests() {
         {L"virtual", true, true, true, 1.0f, false, true}, {L"a", false, false, false, 0.8f, false, true}}, L"a", oldRoles);
     check(hinted.roles[0].id == L"a" && std::abs(hinted.roles[0].volume - 0.8f) < 0.00001f);
     check(launchHintFresh(1000, 61000)); check(!launchHintFresh(1000, 61001)); check(!launchHintFresh(1001, 1000));
+    // A console role record built the way the constructor builds it reads back as a number.
+    const auto consoleRole = Json::object({{"role", static_cast<unsigned>(eConsole)}, {"id", "a"}, {"volume", 0.5f}, {"muted", false}});
+    check(Json::parse(consoleRole.stringify()).at("role").asNumber() == eConsole);
     check(chooseOutput({L"a", L"b"}, {L"gone", L"b"}, {}) == L"b");
     check(chooseOutput({L"a"}, {L"b", L"a"}, L"b").empty());
     check(chooseOutput({L"a", L"b"}, {L"b", L"a"}, L"a") == L"a");

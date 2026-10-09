@@ -228,7 +228,7 @@ public:
                     auto found = findEndpoint(id);
                     if (found && !found->virtualDevice && found->volumeKnown) {
                         remember(id);
-                        if (restore_.empty()) restore_.push_back(Json::object({{"role", eConsole}, {"id", utf8(id)}, {"volume", found->volume}, {"muted", found->muted}}));
+                        if (restore_.empty()) restore_.push_back(Json::object({{"role", static_cast<unsigned>(eConsole)}, {"id", utf8(id)}, {"volume", found->volume}, {"muted", found->muted}}));
                     }
                 }
             }
@@ -238,7 +238,7 @@ public:
             diagnostics.step(StartupStep::outputVolume);
             auto e = findEndpoint(outputId_);
             if (!e->volumeKnown) throw std::runtime_error("Original output volume could not be read");
-            restore_.push_back(Json::object({{"role", eConsole}, {"id", utf8(e->id)}, {"volume", e->volume}, {"muted", e->muted}}));
+            restore_.push_back(Json::object({{"role", static_cast<unsigned>(eConsole)}, {"id", utf8(e->id)}, {"volume", e->volume}, {"muted", e->muted}}));
         }
     }
     ~Engine() { shutdown(); }

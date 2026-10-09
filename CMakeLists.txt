@@ -2,7 +2,7 @@
 # Copyright (C) 2026 Hikari
 cmake_minimum_required(VERSION 3.25)
 cmake_policy(SET CMP0091 NEW)
-project(HikariSoundEngine VERSION 1.0.3 LANGUAGES C CXX RC)
+project(HikariSoundEngine VERSION 1.0.4 LANGUAGES C CXX RC)
 if(NOT MSVC OR NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
   message(FATAL_ERROR "MSVC v143 x64 is required")
 endif()

@@ -27,6 +27,9 @@ public:
     Json(bool value) : value_(value) {}
     template <class T, std::enable_if_t<std::is_arithmetic_v<T> && !std::is_same_v<T, bool>, int> = 0>
     Json(T value) : value_(static_cast<double>(value)) {}
+    // An enum would otherwise convert to bool and be stored as true or false; callers convert it to a number themselves.
+    template <class T, std::enable_if_t<std::is_enum_v<T>, long> = 0>
+    Json(T value) = delete;
     Json(const char* value) : value_(std::string(value)) {}
     Json(std::string value) : value_(std::move(value)) {}
     Json(std::string_view value) : value_(std::string(value)) {}
