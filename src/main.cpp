@@ -28,7 +28,7 @@
 #include <stdexcept>
 
 void runProtocolTests();
-namespace hikari { void runLifecycleTests(); void runStorageTests(); void runHostTests(); void runUpstreamEnumerationFailureTests(); }
+namespace hikari { void runLifecycleTests(); void runStorageTests(); void runHostTests(); void runUpstreamEnumerationFailureTests(); void runAudioPassthruTests(); }
 static void printJson(const hikari::Json& value) {
     auto text = value.stringify() + "\n"; DWORD written;
     auto output = GetStdHandle(STD_OUTPUT_HANDLE);
@@ -80,6 +80,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int) {
             auto test = [](const char* name, void (*run)()) { printJson(hikari::Json::object({{"test", name}, {"state", "running"}})); run(); };
             test("startup-diagnostics", hikari::runStartupDiagnosticsTests);
             test("upstream-enumeration-failure", hikari::runUpstreamEnumerationFailureTests);
+            test("audio-passthru", hikari::runAudioPassthruTests);
             test("protocol", runProtocolTests); test("parametric", hikari::runEqTests); test("graphic", hikari::runGraphicTests);
             test("lifecycle", hikari::runLifecycleTests); test("storage", hikari::runStorageTests); test("host", hikari::runHostTests);
             test("audio-format", hikari::runAudioFormatTests); test("audio-identity", hikari::runAudioIdentityTests);

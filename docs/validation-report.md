@@ -2,6 +2,24 @@
 
 這份報告不把離線自測當成音訊裝置、驅動或遊戲驗證；所有驗證都沒有安裝驅動、切換預設裝置、向實體裝置播放測試音或建立啟動項。A4 量測仍保留待測。
 
+## 1.0.5（2026-11-04）
+
+1U 的音效診斷裡有一類一直判不出來：使用者報「开启后没有声音，关闭后才恢复」，引擎卻是 `processing`、音量正常、沒靜音、沒有 `Output failure`。這次查到的頭號原因：上游 `AudioPassthruPrivate` 的建構子不寫 `bool mute_`，它有使用者提供的建構子，所以 `new AudioPassthruPrivate()` 不會歸零；`threadWorker` 只在 `!mute_` 時才呼叫 `sndDevicesDoPlayback`。官方程式的 `FxController` 會呼叫 `mute(false)`，這個宿主從來沒有呼叫過，值就是堆積區留下的內容。非零時所有播放寫入都被跳過，DSP 照跑，`processing` 只看 `audioFrames` 與裝置可用旗標，所以狀態與日誌看不出異常。這仍是假設：現場沒有能直接看到這個旗標的資料。
+
+- 修正：所有音訊物件都經 `createAudioPassthru()` 建立，建好立刻 `mute(false)`，先於 `init()` 與第一次處理執行緒。不改上游程式。
+- 自測：新增 `audio-passthru`，把釋放前填滿 0x41 的區塊留給下一次配置，重試到新物件真的落在那塊上（以同樣沒寫入的 `p_dfx_dsp_` 當見證），再要求 `mute_` 為 0；一直打不中就算失敗，不會空轉通過。測試不解構上游物件，因為解構會還原 Windows 預設裝置。先只加測試不修程式時失敗（`A new audio object can start muted`），加上修正後通過。
+
+實跑證據（2026-11-04，開發機，未安裝驅動、未碰真實音訊裝置）：
+
+- 已簽署 1.0.4 的雜湊等於 1U 釘值。同一次建置的 `AudioPassthruPrivate.obj` 反組譯（MSVC 14.44、`/MT`、Release）：建構子不寫 `+0x438`，`mute()` 才寫；處理迴圈 `cmp byte ptr [rbx+438h],dil` 後 `jne` 跳過 `sndDevicesDoPlayback`。
+- 另以引擎原始碼的暫存副本量測（真 JSON、真 DSP、真列舉讀取；假端點清單，寫預設與音量的函式改成空的，配置後立刻結束，不呼叫上游 `init`），讀新物件的 `+0x438`：修正前第一次配置 400 次有 9 次非零（都是自訂 EQ，8 次在固定輸出）；模擬 `set-buffer` 的第二次配置 200 次有 82 次非零，值多是 JSON 與 GUID 文字殘留；先放 0x41 的對照組讀到 65。修正後兩條路各 200 次全為 0。這個副本沒有上游初始化的配置流量，比例只能證明碰得到，不能當現場比例。
+- 找反證一輪（codex `gpt-6.1-sol` max）：35 條引用全部核到，沒有找到把 `mute_` 寫成 0 的路徑或會讓這個解釋失效的現象，但明確指出這不等於現場根因；`processing` 連全零的包也會計，所以也不能排除路由或輸入問題；持續 `ready` 不是這個機制；診斷只量端點音量，沒量引擎自己的音訊工作階段。修法沒有找到副作用。
+- `node tools/audit-source.mjs` 通過（85 個檔案）；建置腳本套用補丁後 `node tools/verify-upstream.mjs` 通過，`node tools/verify-upstream.mutations.mjs` 58 項變異全被拒、原檔還原；`node --test tools/source-archive-policy.test.mjs` 通過。
+- 連續兩次 `build.ps1 -Clean` 都退出 0，離線自測通過（`audioDevicesTouched:false`），兩次執行檔位元組相同。執行檔未簽章 1,314,304 bytes，SHA256 `0e37ff1733a39c772f8ad67943949040772e76c6929e2525b7cab792e94650d1`；簽章後雜湊會變。`--version` 回報 `1.0.5`、protocol 1。
+- 三個驅動檔與 1.0.4 位元組相同，`node tools/verify-distribution.mjs` 回報 `driverCatalogVerified:true`。
+
+真實音訊仍要在虛擬機或內測機驗收。1.0.5 是否修好，看開著音效、放著影片上傳的診斷：虛擬聲卡與輸出裝置 `peak` 都大於 0 而使用者仍沒聲，往裝置與工作階段查；虛擬聲卡大於 0、輸出裝置為 0，就不是這個原因，要再查引擎。
+
 ## 1.0.4（2026-10-09）
 
 1.0.3 上線當天，1U 2.8.2 回來三台（Windows 10 19045 兩台、Windows 11 22631 一台，三種不同的播放裝置）的音效診斷，每次開啟都在同一步結束，日誌是 `Clean shutdown` 之後緊接 `Startup failure recovery RECOVERY_SNAPSHOT_FAILED 0x00000000`。原因是建構子的兩處備援角色記錄：1U 啟用虛擬聲卡後，Windows 常把預設播放裝置自動切到虛擬聲卡，引擎此時找不到實體預設，就用 launch hint 或所選輸出補一筆主控台角色，寫法是 `{"role", eConsole}`。`Json` 的數字建構只收算術型別，列舉於是轉成 `bool`，存成 `"role": false`；啟動走到建立還原快照時以 `asNumber()` 讀回，拋出 `Expected number`，每次都停在這一步。1.0.0 到 1.0.3 都有這兩行。

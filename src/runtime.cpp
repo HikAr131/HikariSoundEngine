@@ -88,6 +88,13 @@ Json::Array fallbackRoleRecords(const Endpoint& e) {
         records.push_back(Json::object({{"role", role}, {"id", utf8(e.id)}, {"volume", e.volume}, {"muted", e.muted}}));
     return records;
 }
+std::unique_ptr<AudioPassthru> createAudioPassthru() {
+    auto audio = std::make_unique<AudioPassthru>();
+    // Only the official app's controller ever writes this flag. Left to whatever the heap held, a non-zero byte
+    // skips every playback write while the engine still reports processing, so the output stays silent.
+    audio->mute(false);
+    return audio;
+}
 static Json error(const char* code, const char* message) {
     return Json::object({{"ok", false}, {"code", code}, {"message", message}});
 }
@@ -529,7 +536,7 @@ private:
         // Upstream init already runs a reinit, so its playback reports must count for this session.
         playbackInitSeen_ = playbackInitializeSequence(); outputRecovery_.reset(); outputInitialized_ = false;
         step(StartupStep::audioInitialize);
-        auto audio = std::make_unique<AudioPassthru>();
+        auto audio = createAudioPassthru();
         if (audio->init() != 0) throw std::runtime_error("Upstream initialization failed");
         audio->setDspProcessingModule(dsp->upstream());
         step(StartupStep::outputSelection);
