@@ -702,13 +702,15 @@ std::optional<WindTracker::Alignment> WindTracker::nearby(std::size_t index, dou
     updateUsualPower();
     const auto& reference = references_->items()[index];
     const std::size_t frames = kLocalPoints * kCoarseDecimation;
-    const std::int64_t frame = now_ - static_cast<std::int64_t>(frames);
-    position -= static_cast<double>(frames) * rate;
+    // The power of a sub-frame is known once it is complete, and at a common boundary only after this block.
+    const std::int64_t end = (now_ - 1) / static_cast<std::int64_t>(kSubFrame) * static_cast<std::int64_t>(kSubFrame);
+    const std::int64_t frame = end - static_cast<std::int64_t>(frames);
+    position -= static_cast<double>(now_ - frame) * rate;
     if (!coarse(index, frame, kLocalPoints, (kLocalBack - frames) / kCoarseDecimation * kCoarseDecimation, position)) return std::nullopt;
-    const std::int64_t tail = now_ - static_cast<std::int64_t>(kRawTailStart + kRawTail);
+    const std::int64_t tail = end - static_cast<std::int64_t>(kRawTailStart + kRawTail);
     double precise = position + static_cast<double>(tail - frame);
     fine(index, tail, precise);
-    const std::int64_t segment = now_ - static_cast<std::int64_t>(kSegment);
+    const std::int64_t segment = end - static_cast<std::int64_t>(kSegment);
     double start = precise + static_cast<double>(segment - tail);
     Alignment result;
     result.correlation = correlate(index, segment, kSegment, kSegmentRadius, start);

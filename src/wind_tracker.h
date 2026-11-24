@@ -100,11 +100,11 @@ private:
     void trackPosition();
     void realign();
     void relocate();
-    // Looks for the reference close to where it should be at frame `now_`, in the last 0.4 s.
+    // Looks for the reference close to where it should be at frame `now_`, in the last 0.4 s of complete sub-frames.
     std::optional<Alignment> nearby(std::size_t reference, double position, double rate);
     void recover();
     bool explains(std::size_t reference, const Alignment& alignment);
-    bool strict() const noexcept { return strictReturn_ && now_ - last_.frame < wind::kRecentLockFrames; }
+    bool strict() const noexcept { return strictReturn_ && last_.valid && now_ - last_.frame < wind::kRecentLockFrames; }
     void move(double offset);
     void publish();
 

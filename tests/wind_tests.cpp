@@ -105,7 +105,7 @@ struct Scenario {
 };
 struct Outcome {
     double lockSeconds = -1, residualDb = 0, footstepDb = 0, worstStepDb = 0, recoverSeconds = -1, silentSeconds = -1, worstSample = 0, windPeak = 0;
-    double tailDb = 0;
+    double tailDb = 0, relockSeconds = -1, relockDb = 0;
     int steps = 0, locks = 0;
     std::uint64_t losses = 0;
     int reference = -1;
@@ -167,7 +167,7 @@ Outcome play(const Scenario& s, const std::vector<Samples>& raw, const std::shar
         const double t = static_cast<double>(frame + block) / s.rate;
         const bool locked = stage.status().state == WindState::locked;
         if (locked && outcome.lockSeconds < 0) { outcome.lockSeconds = t; outcome.reference = stage.status().reference; }
-        if (locked && !was) ++outcome.locks;
+        if (locked && !was && ++outcome.locks == 2) outcome.relockSeconds = t;
         was = locked;
         if (s.slipAt > 0 && outcome.recoverSeconds < 0 && t > s.slipAt + 0.1 && residual(frame + block - s.rate / 20, frame + block) < -13) outcome.recoverSeconds = t - s.slipAt;
         if (gapped && outcome.recoverSeconds < 0 && t > s.gapAt + 0.15 && residual(frame + block - s.rate / 20, frame + block) < -13) outcome.recoverSeconds = t - s.gapAt;
@@ -175,6 +175,10 @@ Outcome play(const Scenario& s, const std::vector<Samples>& raw, const std::shar
     }
     outcome.losses = stage.tracker()->losses();
     outcome.tailDb = residual(frames - s.rate, frames);
+    if (outcome.relockSeconds > 0) {
+        const auto relock = static_cast<std::size_t>(outcome.relockSeconds * s.rate);
+        outcome.relockDb = residual(std::min(relock, frames), std::min(relock + s.rate / 2, frames));
+    }
     if (outcome.lockSeconds < 0) return outcome;
     const auto from = static_cast<std::size_t>((outcome.lockSeconds + 0.8) * s.rate), to = s.stopAt > 0 ? static_cast<std::size_t>(s.stopAt * s.rate) : gapStart ? gapStart : frames;
     outcome.residualDb = residual(from, to);
@@ -416,6 +420,15 @@ void testScenarios(const std::string& label, const std::vector<Samples>& raw, co
         const auto outcome = play(s, raw, references);
         require(outcome.recoverSeconds > 0 && outcome.recoverSeconds <= 1, label + (known ? " known" : " unknown") + " gap not recovered: " + std::to_string(outcome.recoverSeconds));
     }
+    // A shot in the very last moment that is searched through is turned down like any other.
+    for (const auto& [gapAt, shots] : {std::pair{4.67, 1.0}, std::pair{4.70, 0.3}}) {
+        Scenario s;
+        s.gapAt = gapAt;
+        s.gapKnown = false;
+        s.shots = shots;
+        const auto outcome = play(s, raw, references);
+        require(outcome.recoverSeconds > 0 && outcome.recoverSeconds <= 1, label + " gap before a shot not recovered: " + std::to_string(outcome.recoverSeconds));
+    }
     // The same when nobody reports it: a moment that is missing or repeated, up to a fifth of a second, is found close
     // by, and a longer one by a search.
     for (const int mix : {0, 1}) {
@@ -439,6 +452,7 @@ void testScenarios(const std::string& label, const std::vector<Samples>& raw, co
         s.seconds = 13;
         const auto outcome = play(s, raw, references);
         require(outcome.losses == 1 && outcome.locks == 2 && outcome.tailDb <= -15, label + " wind that turned quiet: " + std::to_string(outcome.losses) + " losses, " + std::to_string(outcome.tailDb) + " dB left");
+        require(outcome.relockDb <= 0, label + " wind that turned quiet comes out louder than it went in: " + std::to_string(outcome.relockDb) + " dB");
     }
     // After an abrupt end a doubtful match is not believed, but not for ever either.
     for (const double seconds : {10.0, 16.0}) {
@@ -450,6 +464,19 @@ void testScenarios(const std::string& label, const std::vector<Samples>& raw, co
         s.seconds = seconds;
         const auto outcome = play(s, raw, references);
         require(outcome.locks == (seconds < 12 ? 1 : 2) && (seconds < 12 || outcome.tailDb <= -15), label + " doubtful wind after " + std::to_string(seconds - 5) + " s: " + std::to_string(outcome.locks) + " locks");
+    }
+    // A break of unknown length says nothing about what follows, so the doubt ends there.
+    {
+        Scenario s;
+        s.fallAt = s.rumbleAt = 5;
+        s.fallDb = -14;
+        s.rumble = 0.008;
+        s.rumbleCutoff = 1500;
+        s.gapAt = 5.4;
+        s.gapKnown = false;
+        s.seconds = 10;
+        const auto outcome = play(s, raw, references);
+        require(outcome.locks == 2 && outcome.tailDb <= -15, label + " doubtful wind after a break: " + std::to_string(outcome.locks) + " locks");
     }
     // A rumble on top makes the match look doubtful, but the fitted model still explains the wind.
     {
@@ -471,7 +498,7 @@ void testScenarios(const std::string& label, const std::vector<Samples>& raw, co
         s.shots = 0.1;
         s.seed = seed;
         const auto outcome = play(s, raw, references);
-        require(outcome.locks == 1, label + " wind that ended is found again");
+        require(outcome.locks == 1 && outcome.lockSeconds < s.stopAt, label + " wind that ended is found again");
     }
     // A tracker that gets no processor time catches up on the same timeline: short of what the ring holds, far
     // beyond it, and with more lost packets than there are slots for them.
