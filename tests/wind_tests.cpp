@@ -98,11 +98,15 @@ struct Scenario {
     // The tracker gets no time, and every block may lose a few frames, from `stallAt` for `stallSeconds`.
     double stallAt = 0, stallSeconds = 0;
     std::size_t stallGap = 0;
+    // The wind jumps by this many 48 kHz frames and nothing reports it, as when the game itself stutters.
+    double slipAt = 0, slipFrames = 0;
+    // A steady rumble sets in, and the wind itself suddenly plays at another level.
+    double rumbleAt = 0, rumble = 0, rumbleCutoff = 2500, fallAt = 0, fallDb = 0;
 };
 struct Outcome {
     double lockSeconds = -1, residualDb = 0, footstepDb = 0, worstStepDb = 0, recoverSeconds = -1, silentSeconds = -1, worstSample = 0, windPeak = 0;
     double tailDb = 0;
-    int steps = 0;
+    int steps = 0, locks = 0;
     std::uint64_t losses = 0;
     int reference = -1;
 };
@@ -110,13 +114,14 @@ struct Outcome {
 Outcome play(const Scenario& s, const std::vector<Samples>& raw, const std::shared_ptr<const WindReferenceSet>& references) {
     const std::size_t frames = static_cast<std::size_t>(s.seconds * s.rate), block = s.rate / 100;
     std::vector<float> wind(frames * 2), steps(frames * 2), other(frames * 2), out(frames * 2);
-    Noise noise(s.seed);
-    Biquad low[2], eq[2], voice[2], foot[2], shot[2];
+    Noise noise(s.seed), deep(s.seed + 100);
+    Biquad low[2], eq[2], voice[2], foot[2], shot[2], rumble[2];
     for (std::size_t channel = 0; channel < 2; ++channel) {
         low[channel] = Biquad::lowpass(s.cutoff, s.rate); eq[channel] = Biquad::peak(1200, s.eqDb, 1, s.rate);
         voice[channel] = Biquad::lowpass(2500, s.rate); foot[channel] = Biquad::lowpass(700, s.rate); shot[channel] = Biquad::lowpass(7000, s.rate);
+        rumble[channel] = Biquad::lowpass(s.rumbleCutoff, s.rate);
     }
-    const double amplitude = std::pow(10.0, s.gainDb / 20), step = 48000.0 / s.rate * (1 + s.ppm * 1e-6);
+    const double amplitude = std::pow(10.0, s.gainDb / 20), fall = std::pow(10.0, s.fallDb / 20), step = 48000.0 / s.rate * (1 + s.ppm * 1e-6);
     const auto& source = raw[s.reference];
     for (std::size_t frame = 0; frame < frames; ++frame) {
         const double t = static_cast<double>(frame) / s.rate;
@@ -126,16 +131,18 @@ Outcome play(const Scenario& s, const std::vector<Samples>& raw, const std::shar
         const double shotLevel = std::fmod(t, 4.0) < 2 ? std::exp(-std::fmod(t, 1.3) / 0.05) : 0, c = noise.gauss(), d = noise.gauss();
         for (std::size_t channel = 0; channel < 2; ++channel) {
             const std::size_t index = frame * 2 + channel;
-            wind[index] = blowing ? static_cast<float>(eq[channel].run(low[channel].run(at(source, s.position + step * static_cast<double>(frame), channel))) * amplitude) : 0.0f;
+            const double slip = s.slipAt > 0 && t >= s.slipAt ? s.slipFrames : 0;
+            wind[index] = blowing ? static_cast<float>(eq[channel].run(low[channel].run(at(source, s.position + slip + step * static_cast<double>(frame), channel))) * amplitude * (s.fallAt > 0 && t >= s.fallAt ? fall : 1)) : 0.0f;
             steps[index] = static_cast<float>(s.footsteps * 4 * foot[channel].run(0.7 * a + 0.3 * (channel ? b : -b)) * stepLevel);
             other[index] = static_cast<float>(steps[index] + s.voice * voice[channel].run(v) * speaking + s.shots * shot[channel].run(0.8 * c + 0.2 * (channel ? d : -d)) * shotLevel);
+            if (s.rumble > 0 && t >= s.rumbleAt) other[index] += static_cast<float>(s.rumble * rumble[channel].run(deep.gauss()));
             out[index] = wind[index] + other[index];
         }
     }
     WindStage stage(s.rate, 2, references);
     Outcome outcome;
     const std::size_t gapStart = s.gapAt > 0 ? static_cast<std::size_t>(s.gapAt * 100) * block : 0, gapLength = 5 * block;
-    bool gapped = false;
+    bool gapped = false, was = false;
     const auto residual = [&](std::size_t from, std::size_t to) {
         double error = 0, power = 1e-20;
         for (std::size_t index = from * 2; index < to * 2; ++index) {
@@ -160,6 +167,9 @@ Outcome play(const Scenario& s, const std::vector<Samples>& raw, const std::shar
         const double t = static_cast<double>(frame + block) / s.rate;
         const bool locked = stage.status().state == WindState::locked;
         if (locked && outcome.lockSeconds < 0) { outcome.lockSeconds = t; outcome.reference = stage.status().reference; }
+        if (locked && !was) ++outcome.locks;
+        was = locked;
+        if (s.slipAt > 0 && outcome.recoverSeconds < 0 && t > s.slipAt + 0.1 && residual(frame + block - s.rate / 20, frame + block) < -13) outcome.recoverSeconds = t - s.slipAt;
         if (gapped && outcome.recoverSeconds < 0 && t > s.gapAt + 0.15 && residual(frame + block - s.rate / 20, frame + block) < -13) outcome.recoverSeconds = t - s.gapAt;
         if (s.stopAt > 0 && t > s.stopAt && outcome.silentSeconds < 0 && stage.canceller().appliedGain() <= 0) outcome.silentSeconds = t - s.stopAt;
     }
@@ -176,9 +186,9 @@ Outcome play(const Scenario& s, const std::vector<Samples>& raw, const std::shar
     if (square > 0) outcome.footstepDb = 20 * std::log10(std::max(1e-6, product / square));
     // Every single step on its own: an average would hide one that is gone.
     const auto period = static_cast<std::size_t>(0.45 * s.rate), length = static_cast<std::size_t>(0.06 * s.rate);
-    for (std::size_t step = (from / period + 1) * period; step + length < to; step += period) {
+    for (std::size_t start = (from / period + 1) * period; start + length < to; start += period) {
         double along = 0, own = 0;
-        for (std::size_t index = step * 2; index < (step + length) * 2; ++index) {
+        for (std::size_t index = start * 2; index < (start + length) * 2; ++index) {
             along += static_cast<double>(out[index]) * steps[index];
             own += static_cast<double>(steps[index]) * steps[index];
         }
@@ -405,6 +415,63 @@ void testScenarios(const std::string& label, const std::vector<Samples>& raw, co
         s.gapKnown = known;
         const auto outcome = play(s, raw, references);
         require(outcome.recoverSeconds > 0 && outcome.recoverSeconds <= 1, label + (known ? " known" : " unknown") + " gap not recovered: " + std::to_string(outcome.recoverSeconds));
+    }
+    // The same when nobody reports it: a moment that is missing or repeated, up to a fifth of a second, is found close
+    // by, and a longer one by a search.
+    for (const int mix : {0, 1}) {
+        Scenario s;
+        if (mix) { s.voice = 0.015; s.shots = 0.1; s.cutoff = 6000; }
+        const double undisturbed = play(s, raw, references).tailDb;
+        for (const double slip : {480.0, -480.0, 2400.0, -2400.0, 9000.0, 96000.0}) {
+            s.slipAt = 5;
+            s.slipFrames = slip;
+            const auto outcome = play(s, raw, references);
+            const std::string what = label + " unreported slip of " + std::to_string(slip) + (mix ? " in a busy mix" : "");
+            require(outcome.recoverSeconds > 0 && outcome.recoverSeconds <= (std::abs(slip) > 9600 ? 3.5 : 1), what + " not recovered: " + std::to_string(outcome.recoverSeconds));
+            require(outcome.tailDb <= std::max(-15.0, undisturbed + 3), what + " leaves wind behind: " + std::to_string(outcome.tailDb) + " dB");
+        }
+    }
+    // The same wind suddenly far quieter: still found at the old place, but the old level is never applied to it again.
+    {
+        Scenario s;
+        s.fallAt = 5;
+        s.fallDb = -20;
+        s.seconds = 13;
+        const auto outcome = play(s, raw, references);
+        require(outcome.losses == 1 && outcome.locks == 2 && outcome.tailDb <= -15, label + " wind that turned quiet: " + std::to_string(outcome.losses) + " losses, " + std::to_string(outcome.tailDb) + " dB left");
+    }
+    // After an abrupt end a doubtful match is not believed, but not for ever either.
+    for (const double seconds : {10.0, 16.0}) {
+        Scenario s;
+        s.fallAt = s.rumbleAt = 5;
+        s.fallDb = -14;
+        s.rumble = 0.012;
+        s.rumbleCutoff = 1500;
+        s.seconds = seconds;
+        const auto outcome = play(s, raw, references);
+        require(outcome.locks == (seconds < 12 ? 1 : 2) && (seconds < 12 || outcome.tailDb <= -15), label + " doubtful wind after " + std::to_string(seconds - 5) + " s: " + std::to_string(outcome.locks) + " locks");
+    }
+    // A rumble on top makes the match look doubtful, but the fitted model still explains the wind.
+    {
+        Scenario s;
+        s.slipAt = s.rumbleAt = 5;
+        s.slipFrames = 96000;
+        s.rumble = 0.03;
+        s.rumbleCutoff = 1500;
+        s.seconds = 10;
+        const auto outcome = play(s, raw, references);
+        require(outcome.recoverSeconds > 0 && outcome.recoverSeconds <= 3.5, label + " wind under a rumble not found again: " + std::to_string(outcome.recoverSeconds));
+    }
+    // Wind that ends while everything else goes on is not found again.
+    for (const unsigned seed : {1u, 6u, 11u}) {
+        Scenario s;
+        s.stopAt = 4;
+        s.seconds = 16;
+        s.voice = 0.02;
+        s.shots = 0.1;
+        s.seed = seed;
+        const auto outcome = play(s, raw, references);
+        require(outcome.locks == 1, label + " wind that ended is found again");
     }
     // A tracker that gets no processor time catches up on the same timeline: short of what the ring holds, far
     // beyond it, and with more lost packets than there are slots for them.

@@ -100,6 +100,11 @@ private:
     void trackPosition();
     void realign();
     void relocate();
+    // Looks for the reference close to where it should be at frame `now_`, in the last 0.4 s.
+    std::optional<Alignment> nearby(std::size_t reference, double position, double rate);
+    void recover();
+    bool explains(std::size_t reference, const Alignment& alignment);
+    bool strict() const noexcept { return strictReturn_ && now_ - last_.frame < wind::kRecentLockFrames; }
     void move(double offset);
     void publish();
 
@@ -124,7 +129,7 @@ private:
     double quality_ = 0;
     // Where a plain correlation finds the muffled reference, behind the position that is rendered.
     double apparent_ = 0;
-    std::int64_t lockedAt_ = 0, lastRealign_ = 0, lastDelay_ = 0, relocateFrom_ = -1;
+    std::int64_t lockedAt_ = 0, lastRealign_ = 0, lastDelay_ = 0, relocateFrom_ = -1, recoverFrom_ = -1;
     std::uint32_t breaks_ = 0;
     std::int64_t searched_ = 0;
     int dropCount_ = 0;

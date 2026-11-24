@@ -18,6 +18,9 @@ constexpr std::size_t kBackfill = 47616;
 static_assert(kBackfill % kBlock == 0);
 constexpr int kDropEstimates = 3;
 constexpr std::size_t kRelocateFrames = 24000;
+// After a lock broke off at once: when to look for it close by, how often, and for how long.
+constexpr std::int64_t kRecoverFirst = 9600, kRecoverEvery = 4608, kRecoverLast = 28800;
+constexpr int kRecoverBands = 2;
 constexpr std::int64_t kFitPatience = 96000;
 // Sub-frames above this multiple of the usual power are turned down to it.
 constexpr double kLoudPower = 4;
@@ -109,6 +112,7 @@ void WindTracker::discontinuity(std::uint32_t breaks) {
     breaks_ = breaks;
     subFrames_ = 0;
     for (auto& slot : slots_) slot.used = false;
+    recoverFrom_ = -1;
     if (lock_.locked) relocateFrom_ = now_;
     else last_.valid = false;
 }
@@ -402,9 +406,10 @@ void WindTracker::consider(std::size_t index, const Alignment& alignment) {
         const double predicted = last_.position + static_cast<double>(alignment.frame - last_.frame) * last_.rate;
         const double distance = std::abs(reference.distance(alignment.position, predicted));
         const double drift = kHandoverPerFrame * static_cast<double>(elapsed);
-        // Right after a lock a jump is far more likely a false match than a restart of the loop.
-        if (distance >= kRecentLockDistance + drift) return;
-        if (distance <= kHandoverRadius + drift && !strictReturn_) {
+        // Right after a lock a jump is far more likely a false match than a restart of the loop, unless the lock
+        // broke off at once: then it did jump, and it has to match well to be believed.
+        if (distance >= kRecentLockDistance + drift && !strict()) return;
+        if (distance <= kHandoverRadius + drift && !strict()) {
             beginLock(index, alignment.frame, alignment.position, alignment.rate, true);
             return;
         }
@@ -460,7 +465,8 @@ void WindTracker::runSlot(Slot& slot) {
     if (verdict == Verdict::contradicted || (verdict == Verdict::unclear && ++slot.unclear > kMaxUnclear)) { slot.used = false; return; }
     if (verdict == Verdict::unclear || ++slot.passes < kConfirmPasses) return;
     slot.used = false;
-    if (strictReturn_ && slot.weakest < kQualityReturn) return;
+    // Other sounds lower the correlation, but not what the fitted model explains.
+    if (strict() && slot.weakest < kQualityReturn && !explains(slot.reference, {slot.frame, slot.position, slot.rate, 0})) return;
     beginLock(slot.reference, slot.frame, slot.position, slot.rate, false);
 }
 
@@ -526,7 +532,7 @@ bool WindTracker::beginModel() {
 
 void WindTracker::beginLock(std::size_t reference, std::int64_t frame, double position, double rate, bool continued) {
     for (auto& slot : slots_) slot.used = false;
-    relocateFrom_ = -1;
+    relocateFrom_ = recoverFrom_ = -1;
     strictReturn_ = false;
     dropCount_ = 0;
     const bool keep = continued && model_.fitted();
@@ -581,6 +587,7 @@ void WindTracker::block() {
             if (slot.used) runSlot(slot);
             if (lock_.locked) return;
         }
+        if (recoverFrom_ >= 0) recover();
         return;
     }
     if (relocateFrom_ >= 0) {
@@ -632,6 +639,7 @@ void WindTracker::trackBlock() {
     if (dropCount_ >= kDropEstimates) {
         loseLock(false);
         strictReturn_ = true;
+        recoverFrom_ = now_;
         return;
     }
     if (blocks_ % kLoopBlocks == 0) trackPosition();
@@ -684,19 +692,58 @@ void WindTracker::realign() {
 void WindTracker::relocate() {
     // After a break of unknown length the old position says nothing about the next one.
     const auto lose = [this] { loseLock(true); last_.valid = false; };
-    updateUsualPower();
     const auto index = static_cast<std::size_t>(lock_.reference);
+    const auto alignment = nearby(index, positionAt(now_) - apparent_, lock_.rate);
+    if (!alignment) { lose(); return; }
+    beginLock(index, alignment->frame, alignment->position, alignment->rate, true);
+}
+
+std::optional<WindTracker::Alignment> WindTracker::nearby(std::size_t index, double position, double rate) {
+    updateUsualPower();
     const auto& reference = references_->items()[index];
     const std::size_t frames = kLocalPoints * kCoarseDecimation;
     const std::int64_t frame = now_ - static_cast<std::int64_t>(frames);
-    double position = positionAt(frame) - apparent_;
-    if (!coarse(index, frame, kLocalPoints, (kLocalBack - frames) / kCoarseDecimation * kCoarseDecimation, position)) { lose(); return; }
+    position -= static_cast<double>(frames) * rate;
+    if (!coarse(index, frame, kLocalPoints, (kLocalBack - frames) / kCoarseDecimation * kCoarseDecimation, position)) return std::nullopt;
     const std::int64_t tail = now_ - static_cast<std::int64_t>(kRawTailStart + kRawTail);
     double precise = position + static_cast<double>(tail - frame);
     fine(index, tail, precise);
     const std::int64_t segment = now_ - static_cast<std::int64_t>(kSegment);
     double start = precise + static_cast<double>(segment - tail);
-    if (correlate(index, segment, kSegment, kSegmentRadius, start) < kLooseCorrelation) { lose(); return; }
-    beginLock(index, segment + static_cast<std::int64_t>(kSegment / 2), reference.wrap(start + static_cast<double>(kSegment) / 2), lock_.rate, true);
+    Alignment result;
+    result.correlation = correlate(index, segment, kSegment, kSegmentRadius, start);
+    if (result.correlation < kLooseCorrelation) return std::nullopt;
+    result.frame = segment + static_cast<std::int64_t>(kSegment / 2);
+    result.position = reference.wrap(start + static_cast<double>(kSegment) / 2);
+    result.rate = rate;
+    return result;
+}
+
+// The lock broke off at once. When the sound merely slipped without anybody noticing, the same wind goes on close by.
+void WindTracker::recover() {
+    const std::int64_t waited = now_ - recoverFrom_;
+    if (waited > kRecoverLast) { recoverFrom_ = -1; return; }
+    if (waited < kRecoverFirst || (waited - kRecoverFirst) % kRecoverEvery != 0) return;
+    const auto alignment = nearby(last_.reference, last_.position + static_cast<double>(now_ - last_.frame) * last_.rate, last_.rate);
+    if (alignment && explains(last_.reference, *alignment)) beginLock(last_.reference, alignment->frame, alignment->position, alignment->rate, true);
+}
+
+// Whether the model fitted before explains what is heard now, at this alignment.
+bool WindTracker::explains(std::size_t index, const Alignment& alignment) {
+    constexpr std::size_t blocks = (kSpectrumFft + (kSpectrumFrames - 1) * kSpectrumHop + kBlock - 1) / kBlock;
+    if (!model_.fitted()) return false;
+    model_.resetStatistics();
+    for (std::int64_t at = now_ - static_cast<std::int64_t>(blocks * kBlock); at < now_; at += static_cast<std::int64_t>(kBlock)) {
+        copyInput(at, kBlock, inputBlock_.data());
+        readAligned(index, alignment.position + apparent_ + static_cast<double>(at - alignment.frame) * alignment.rate, alignment.rate, kBlock, alignedBlock_.data());
+        model_.feed(inputBlock_.data(), alignedBlock_.data(), kBlock);
+    }
+    int reliable = 0;
+    for (const auto& band : model_.bandQualities()) {
+        if (!band.reliable) continue;
+        if (band.value < kQualityReturn) return false;
+        ++reliable;
+    }
+    return reliable >= kRecoverBands;
 }
 } // namespace hikari
