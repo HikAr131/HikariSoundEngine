@@ -51,6 +51,13 @@ Parameters parseParameters(const Json& input) {
         p.effects.surround = number(*e, "surround", 0); p.effects.dynamicBoost = number(*e, "dynamicBoost", 0);
         p.effects.bass = number(*e, "bass", 0); p.effects.treble = number(*e, "treble", 0);
     }
+    if (auto d = input.get("delta")) {
+        if (!d->isObject()) throw JsonError("Expected delta object");
+        p.delta.enabled = boolean(*d, "enabled", false); p.delta.wind = boolean(*d, "wind", true);
+        p.delta.footstep = number(*d, "footstep", 5);
+        if (auto boom = d->get("boom"); boom && (!boom->isString() || !parseBoomLevel(boom->asString(), p.delta.boom)))
+            throw JsonError("Invalid boom level");
+    }
     std::string error;
     if (!validateParameters(p, &error)) throw JsonError(error);
     return clampParameters(std::move(p));
@@ -70,6 +77,7 @@ Json parametersJson(const Parameters& p) {
     for (const auto& b : p.eq.points) points.push_back(Json::object({{"freq", b.freq}, {"gain", b.gain}}));
     for (const auto& f : p.eq.filters) filters.push_back(Json::object({{"enabled", f.enabled}, {"type", f.type}, {"freq", f.freq}, {"gain", f.gain}, {"q", f.q}}));
     return Json::object({{"bypass", p.bypass}, {"eq", Json::object({{"mode", p.eq.mode}, {"preamp", p.eq.preamp}, {"points", points}, {"filters", filters}})},
-        {"effects", Json::object({{"clarity", p.effects.clarity}, {"ambience", p.effects.ambience}, {"surround", p.effects.surround}, {"dynamicBoost", p.effects.dynamicBoost}, {"bass", p.effects.bass}, {"treble", p.effects.treble}})}});
+        {"effects", Json::object({{"clarity", p.effects.clarity}, {"ambience", p.effects.ambience}, {"surround", p.effects.surround}, {"dynamicBoost", p.effects.dynamicBoost}, {"bass", p.effects.bass}, {"treble", p.effects.treble}})},
+        {"delta", Json::object({{"enabled", p.delta.enabled}, {"wind", p.delta.wind}, {"footstep", p.delta.footstep}, {"boom", boomName(p.delta.boom)}})}});
 }
 }

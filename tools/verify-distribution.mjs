@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { execFileSync } from 'node:child_process';
+import { FILE_NAME as windRefs, verifyPacked } from './pack-wind-refs.mjs';
 const root = path.resolve(import.meta.dirname, '..');
 const exe = path.join(root, 'dist/HikariSoundEngine.exe');
 const bytes = fs.readFileSync(exe);
@@ -69,5 +70,10 @@ for (const name of ['fxvad.inf', 'fxvad.sys']) {
     execFileSync(signtool, ['verify', '/q', '/pg', driverPolicy, '/c', path.join(root, 'dist/drivers/fxvadntamd64.cat'), path.join(root, 'dist/drivers', name)], { stdio: 'pipe', windowsHide: true });
   } catch { throw new Error(`Driver file is not covered by the signed catalog: ${name}`); }
 }
-if (process.argv[2] && !bytes.equals(fs.readFileSync(process.argv[2]))) throw new Error('Clean builds differ byte for byte');
-console.log(JSON.stringify({ ok: true, x64: true, guiSubsystem: true, staticCrt: true, cleanBuildsIdentical: !!process.argv[2], signed: bytes.readUInt32LE(optional + 148) !== 0, exeBytes: bytes.length, exeSha256: crypto.createHash('sha256').update(bytes).digest('hex'), staticImports, delayLoadImports, dllSearch: 'System32 only', driverHashes, driverCatalogVerified: true }, null, 2));
+const options = process.argv.slice(2), withoutWindRefs = options.includes('--without-wind-refs');
+const otherBuild = options.find(value => !value.startsWith('--'));
+const windFile = path.join(root, 'dist', windRefs);
+if (withoutWindRefs) { if (fs.existsSync(windFile)) throw new Error('A build without the wind recordings must not distribute them'); }
+else verifyPacked(fs.readFileSync(windFile));
+if (otherBuild && !bytes.equals(fs.readFileSync(otherBuild))) throw new Error('Clean builds differ byte for byte');
+console.log(JSON.stringify({ ok: true, x64: true, guiSubsystem: true, staticCrt: true, cleanBuildsIdentical: !!otherBuild, windRecordings: withoutWindRefs ? null : crypto.createHash('sha256').update(fs.readFileSync(windFile)).digest('hex'), signed: bytes.readUInt32LE(optional + 148) !== 0, exeBytes: bytes.length, exeSha256: crypto.createHash('sha256').update(bytes).digest('hex'), staticImports, delayLoadImports, dllSearch: 'System32 only', driverHashes, driverCatalogVerified: true }, null, 2));

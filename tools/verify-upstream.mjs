@@ -13,6 +13,13 @@ for (const match of activePatch.matchAll(/^\+\+\+ b\/(.+)$/gm)) {
   const file = path.join(root, 'build/upstream', match[1]);
   if (!fs.readFileSync(file, 'utf8').startsWith('// Hikari modification 2026-10-08:')) throw new Error(`Active endpoint patch was not applied: ${file}`);
 }
+for (const name of ['03-capture-gap.patch', '04-worker-shutdown.patch']) {
+  const text = fs.readFileSync(path.join(root, 'patches', name), 'utf8');
+  for (const match of text.matchAll(/^\+\+\+ b\/(.+)$/gm)) {
+    const file = path.join(root, 'build/upstream', match[1]);
+    if (!fs.readFileSync(file, 'utf8').startsWith('// Hikari modification 2026-11-24:')) throw new Error(`Patch ${name} was not applied: ${file}`);
+  }
+}
 const audio=fs.readFileSync(path.join(root,'build/upstream/audiopassthru/src/AudioPassthru/AudioPassthruPrivate.cpp'),'utf8');
 if(!audio.includes('hikariProcessAudio(p_dfx_dsp_') || /p_dfx_dsp_->(?:setSignalFormat|processAudio)\(/.test(audio)) throw new Error('DSP calls must be serialized by host');
 const device=fs.readFileSync(path.join(root,'build/upstream/audiopassthru/src/sndDevices/sndDevicesSet.cpp'),'utf8');
@@ -31,6 +38,16 @@ for (let step = 1; step <= 10; ++step) {
   if ([...enumeration.matchAll(new RegExp(`hikariOnEnumerationFailure\\(${step}, ${code}\\);`, 'g'))].length !== (step === 5 ? 2 : 1))
     throw new Error(`Enumeration failure diagnostic ${step} absent or duplicated`);
 }
+const passthru = stripComments(fs.readFileSync(path.join(root, 'build/upstream/audiopassthru/src/AudioPassthru/AudioPassthru.cpp'), 'utf8'));
+const passthruHeader = stripComments(fs.readFileSync(path.join(root, 'build/upstream/audiopassthru/include/u_AudioPassthru.h'), 'utf8'));
+if (!/AudioPassthru::~AudioPassthru\(\)\s*\{\s*if \(data_ != NULL && !data_->hikariWorkerStopped\(\)\) return;\s*delete data_;\s*\}/.test(passthru) ||
+    [...passthru.matchAll(/delete data_;/g)].length !== 1 ||
+    !/bool hikariWorkerStopped\(\)\s*\{\s*int timedOut = IS_FALSE;\s*if \(killProcessingThread\(&timedOut\) == OKAY && !timedOut\) return true;\s*hikariOnWorkerStuck\(hProcessingThread_\);\s*return false;\s*\}/.test(passthruHeader))
+  throw new Error('An audio object whose worker still runs must not be freed');
+const capture = stripComments(fs.readFileSync(path.join(root, 'build/upstream/audiopassthru/src/sndDevices/sndDevicesDoCapture.cpp'), 'utf8'));
+if ([...capture.matchAll(/pAudioCaptureLoopback->GetBuffer\(&\(cast_handle->pDataPacketCapture\), &\(cast_handle->numCaptureFramesAvailable\), &flags,\s*&hikariDevicePosition, NULL\);\s*if \(FAILED\(hr\)\) goto Exit;\s*hikariOnCapturePacket\(static_cast<int>\(cast_handle->capturedFramesCount\), static_cast<int>\(cast_handle->numCaptureFramesAvailable\), flags, hikariDevicePosition\);/g)].length !== 1 ||
+    [...capture.matchAll(/->GetBuffer\(/g)].length !== 1)
+  throw new Error('Every captured packet must be reported with its flags and position, right after it was read');
 const setup = stripComments(fs.readFileSync(path.join(root, 'build/upstream/audiopassthru/src/sndDevices/sndDevicesSetupDevices.cpp'), 'utf8'));
 const initializations = [...setup.matchAll(/cast_handle->pAudioClient(Capture|Playback)->Initialize\(/g)];
 const guardPattern = /hr\s*=\s*hikariValidateAudioInitialization\((pwfx|pClosestMatch),\s*&cast_handle->wfx(Capture|Playback)\)\s*\?\s*cast_handle->pAudioClient(Capture|Playback)->Initialize\(([\s\S]*?)\)\s*:\s*AUDCLNT_E_UNSUPPORTED_FORMAT\s*;/g;

@@ -15,6 +15,8 @@ Unresolved upstream provenance:
 
 `BladeMP3EncDLL.h` is excluded from compilation. GUI, JUCE, installers, fxmcp and fxdiag are excluded. No unrelated restricted source code is used.
 
+Wind recordings (`delta-wind-refs.bin`, distributed with the component since 1.1.0): two 48 kHz stereo loops that the engine compares with the game's sound. They are data supplied by the project owner, who has confirmed that they may be distributed with this component. They are not source code, not covered by the AGPL license of the engine and not part of the source repository or the source archive; the engine builds and runs without them, with wind cancellation unavailable. The engine only accepts the exact recordings whose SHA-256 is listed in `src/wind_reference.cpp`.
+
 FxSound is a trademark of FxSound LLC. HikariSoundEngine is an independent derivative and is not an official FxSound product. The virtual device keeps its FxSound name because the signed driver is unmodified. No FxSound product icon or branding is used as the helper's identity.
 
 Redistribution remains subject to the listed licenses. No signed release or public source repository has been published by this local implementation session.

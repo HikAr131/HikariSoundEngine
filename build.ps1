@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Hikari
 [CmdletBinding()]
-param([switch]$Clean)
+param([switch]$Clean, [switch]$WithoutWindRefs)
 $ErrorActionPreference = 'Stop'
 $taskRoot = [IO.Path]::GetFullPath($PSScriptRoot)
 $upstreamRoot = Join-Path $taskRoot 'upstream\fxsound-app'
@@ -64,16 +64,26 @@ try {
     $exe = Join-Path $buildRoot 'cmake\Release\HikariSoundEngine.exe'
     $buildVectors = Join-Path $buildRoot 'cmake\Release\test-vectors'
     New-Item -ItemType Directory -Path $buildVectors -Force | Out-Null
-    foreach ($vectorFile in @('eq-vectors.json', 'graphic-vectors.json')) {
+    foreach ($vectorFile in @('eq-vectors.json', 'graphic-vectors.json', 'delta-golden.json')) {
         Copy-Item -LiteralPath (Join-Path $taskRoot "tests\$vectorFile") -Destination (Join-Path $buildVectors $vectorFile) -Force
+    }
+    # The recordings are data, not source: a checkout without them still builds, with wind cancellation unavailable.
+    $windRefs = Join-Path $taskRoot 'assets\delta-wind-refs.bin'
+    $buildWindRefs = Join-Path $buildRoot 'cmake\Release\delta-wind-refs.bin'
+    $distributionWindRefs = Join-Path $outputRoot 'delta-wind-refs.bin'
+    if ($WithoutWindRefs) {
+        foreach ($stale in @($buildWindRefs, $distributionWindRefs)) { if (Test-Path -LiteralPath $stale) { Remove-Item -LiteralPath $stale -Force } }
+    } else {
+        if (!(Test-Path -LiteralPath $windRefs)) { throw 'assets/delta-wind-refs.bin is missing: create it with tools/pack-wind-refs.mjs, or pass -WithoutWindRefs' }
+        Copy-Item -LiteralPath $windRefs -Destination $buildWindRefs -Force
     }
     $selfTestOutput = Join-Path $buildRoot 'self-test.stdout.txt'
     $selfTestError = Join-Path $buildRoot 'self-test.stderr.txt'
     $selfTestProcess = Start-Process -FilePath $exe -ArgumentList '--self-test' -WindowStyle Hidden -PassThru -RedirectStandardOutput $selfTestOutput -RedirectStandardError $selfTestError
     $selfTestHandle = $selfTestProcess.Handle
-    if (!$selfTestProcess.WaitForExit(120000)) {
+    if (!$selfTestProcess.WaitForExit(300000)) {
         Stop-Process -Id $selfTestProcess.Id -Force
-        throw 'Offline self-test exceeded 120 seconds'
+        throw 'Offline self-test exceeded 300 seconds'
     }
     [uint32]$selfTestExitCode = 0
     if (![HikariBuildProcessExitCode]::GetExitCodeProcess($selfTestHandle, [ref]$selfTestExitCode) -or $selfTestExitCode -eq 259) {
@@ -85,11 +95,13 @@ try {
         throw "Offline self-test failed: $selfTestExitCode"
     }
     $selfTestProcess.Dispose()
+    # Measured alone, right after the self-test has left the machine idle again.
+    Invoke-Checked (Join-Path $buildRoot 'cmake\Release\HikariDeltaRealtimeTest.exe') @()
     New-Item -ItemType Directory -Path $outputRoot -Force | Out-Null
     Copy-Item -LiteralPath $exe -Destination (Join-Path $outputRoot 'HikariSoundEngine.exe') -Force
     $distributionVectors = Join-Path $outputRoot 'test-vectors'
     New-Item -ItemType Directory -Path $distributionVectors -Force | Out-Null
-    foreach ($vectorFile in @('eq-vectors.json', 'graphic-vectors.json')) {
+    foreach ($vectorFile in @('eq-vectors.json', 'graphic-vectors.json', 'delta-golden.json')) {
         Copy-Item -LiteralPath (Join-Path $buildVectors $vectorFile) -Destination (Join-Path $distributionVectors $vectorFile) -Force
     }
     $driverOutput = Join-Path $outputRoot 'drivers'
@@ -115,7 +127,10 @@ try {
         $destinationDocument = if ($document -eq 'THIRD-PARTY.md') { Join-Path $outputRoot 'THIRD-PARTY.txt' } else { Join-Path $outputRoot $document }
         Copy-Item -LiteralPath $sourceDocument -Destination $destinationDocument -Force
     }
-    Invoke-Checked 'node' @('tools/verify-distribution.mjs')
+    if (!$WithoutWindRefs) { Copy-Item -LiteralPath $windRefs -Destination $distributionWindRefs -Force }
+    $distributionArguments = @('tools/verify-distribution.mjs')
+    if ($WithoutWindRefs) { $distributionArguments += '--without-wind-refs' }
+    Invoke-Checked 'node' $distributionArguments
     $hashes = foreach ($file in Get-ChildItem -LiteralPath $outputRoot -File -Recurse | Where-Object { $_.Name -ne 'SHA256SUMS.txt' } | Sort-Object FullName) {
         $relative = $file.FullName.Substring($outputRoot.Length + 1).Replace('\', '/')
         $hashStream = [IO.File]::OpenRead($file.FullName)

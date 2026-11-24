@@ -2,6 +2,7 @@
 #pragma once
 
 #include <cstddef>
+#include "delta_profile.h"
 #include <string>
 #include <vector>
 
@@ -48,6 +49,7 @@ struct Parameters {
     bool bypass = false;
     EqParameters eq;
     Effects effects;
+    DeltaProfile delta;
 };
 
 bool isFilterType(const std::string& type) noexcept;

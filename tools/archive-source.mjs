@@ -19,8 +19,8 @@ const rootFiles = new Set(['.gitattributes', '.gitignore', '.gitmodules', 'CMake
   'THIRD-PARTY.md', 'app.manifest', 'build.ps1']);
 const sourceDirs = new Set(['src', 'tests', 'patches', 'tools', 'docs']);
 const required = ['CMakeLists.txt', 'build.ps1', 'app.manifest', 'LICENSE', 'LICENSE-MS-LPL.txt',
-  'LICENSE-MS-LPL.rtf', 'SOURCE.txt', 'THIRD-PARTY.md', 'patches/01-headless-host.patch',
-  'tests/eq-vectors.json', 'tests/graphic-vectors.json', 'tools/archive-source.mjs',
+  'LICENSE-MS-LPL.rtf', 'SOURCE.txt', 'THIRD-PARTY.md', 'patches/01-headless-host.patch', 'patches/03-capture-gap.patch', 'patches/04-worker-shutdown.patch',
+  'tests/eq-vectors.json', 'tests/graphic-vectors.json', 'tests/delta-golden.json', 'tools/archive-source.mjs', 'tools/pack-wind-refs.mjs',
   'tools/source-archive-policy.mjs', 'tools/verify-upstream.mjs', 'docs/source-archive.md'];
 const forbiddenDirs = new Set(['.git', 'build', 'dist', '.scratch', 'plan', 'node_modules', '.claude', '.hotfix-keys']);
 

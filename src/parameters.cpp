@@ -45,6 +45,7 @@ bool validateParameters(const Parameters& p, std::string* error) {
     for (const auto level : levels) {
         if (!std::isfinite(level)) return fail("Non-finite effect level");
     }
+    if (!validateDelta(p.delta)) return fail("Non-finite footstep level");
     if (error) error->clear();
     return true;
 }
@@ -65,6 +66,7 @@ Parameters clampParameters(Parameters p) {
     p.effects.dynamicBoost = std::clamp(p.effects.dynamicBoost, 0.0, 10.0);
     p.effects.bass = std::clamp(p.effects.bass, 0.0, 10.0);
     p.effects.treble = std::clamp(p.effects.treble, -100.0, 100.0);
+    p.delta = clampDelta(p.delta);
     return p;
 }
 
@@ -86,7 +88,7 @@ bool sameParameters(const Parameters& a, const Parameters& b) noexcept {
         std::equal(a.eq.filters.begin(), a.eq.filters.end(), b.eq.filters.begin(),
             [](const Filter& f, const Filter& g) { return f.enabled == g.enabled && sameFilter(f, g); }) &&
         x.clarity == y.clarity && x.ambience == y.ambience && x.surround == y.surround &&
-        x.dynamicBoost == y.dynamicBoost && x.bass == y.bass && x.treble == y.treble;
+        x.dynamicBoost == y.dynamicBoost && x.bass == y.bass && x.treble == y.treble && sameDelta(a.delta, b.delta);
 }
 
 bool sameEqualizer(const Parameters& a, const Parameters& b) noexcept {

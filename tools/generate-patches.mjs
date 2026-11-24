@@ -142,3 +142,28 @@ modify('audiopassthru/src/sndDevices/sndDevices_GetAll.cpp', text => {
 modify('audiopassthru/src/sndDevices/sndDevicesReInit.cpp', text =>
   replaceOne(text, 'DEVICE_STATE_ACTIVE | DEVICE_STATE_UNPLUGGED', 'DEVICE_STATE_ACTIVE'), '2026-10-08');
 writePatch('02-active-endpoint-enumeration.patch', '# Hikari active endpoint enumeration and private startup failure hooks.');
+changes.clear();
+modify('audiopassthru/src/sndDevices/sndDevicesDoCapture.cpp', text => {
+  text = replaceOne(text, '#include "codedefs.h"', '#include "hikari_upstream_hooks.h"\n#include "codedefs.h"');
+  text = replaceOne(text, '#ifdef _DEBUG\n\t\t\t\t\t&DevicePosition, &QPCPosition);\n#else\n\t\t\t\t\tNULL, NULL);\n#endif',
+    '\t\t\t\t\t&hikariDevicePosition, NULL);');
+  text = replaceOne(text, 'hr = cast_handle->pAudioCaptureLoopback->GetBuffer(',
+    'UINT64 hikariDevicePosition = 0;\n\t\t\t\thr = cast_handle->pAudioCaptureLoopback->GetBuffer(');
+  return replaceOne(text, 'fptr = (float *)(cast_handle->pDataPacketCapture);',
+    'hikariOnCapturePacket(static_cast<int>(cast_handle->capturedFramesCount), static_cast<int>(cast_handle->numCaptureFramesAvailable), flags, hikariDevicePosition);\n' +
+    '\t\t\t\tfptr = (float *)(cast_handle->pDataPacketCapture);');
+}, '2026-11-24');
+writePatch('03-capture-gap.patch', '# Hikari capture gap report: tells the host how many frames were lost in front of a packet.');
+changes.clear();
+modify('audiopassthru/include/u_AudioPassthru.h', text => '#include "hikari_upstream_hooks.h"\n' +
+  replaceOne(text, 'class AudioPassthruPrivate\n{\npublic:', 'class AudioPassthruPrivate\n{\npublic:\n' +
+    '\t// False while the worker could not be stopped in time and therefore still uses this object.\n' +
+    '\tbool hikariWorkerStopped()\n\t{\n\t\tint timedOut = IS_FALSE;\n' +
+    '\t\tif (killProcessingThread(&timedOut) == OKAY && !timedOut) return true;\n' +
+    '\t\thikariOnWorkerStuck(hProcessingThread_);\n\t\treturn false;\n\t}'), '2026-11-24');
+modify('audiopassthru/src/AudioPassthru/AudioPassthru.cpp', text => {
+  return replaceOne(text, '\tdelete data_;',
+    '\t// A worker that still runs on this object ends by itself; freeing it here would pull the memory from under it.\n' +
+    '\tif (data_ != NULL && !data_->hikariWorkerStopped()) return;\n\tdelete data_;');
+}, '2026-11-24');
+writePatch('04-worker-shutdown.patch', '# Hikari worker shutdown: an object whose worker did not stop in time is never freed.');

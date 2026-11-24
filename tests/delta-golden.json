@@ -1,0 +1,49 @@
+{
+  "note": "Every tuned value of the profile's own stages. The self-test compares it with the code, so a change has to be made in both places on purpose. presencePower is low on purpose: wind has to be found at -20 dB as well.",
+  "wind": {
+    "rate": 48000, "block": 384, "window": 48000, "subFrame": 960, "subFrames": 50, "decimation": 6, "taps": 160,
+    "tukeyAlpha": 0.25, "fingerprintFft": 256, "bands": 16, "bandLowHz": 100, "bandSpan": 32, "powerFloor": 1e-30,
+    "normFloor": 1e-12, "coarseDecimation": 16, "rawTailStart": 43904, "rawTail": 4096,
+    "presencePower": 2.5e-6, "presenceCosine": 0.97,
+    "searchInterval": 24000, "maxPeaks": 4, "peakDistance": 2880, "coarseRadius": 480, "coarseLags": 61, "fineRadius": 12,
+    "tryTwoScore": 0.4, "alignScore": 0.35,
+    "looseCorrelation": 0.2, "wholeRadius": 2, "segment": 8192, "segmentRadius": 24,
+    "segmentSpan": 39808, "maxRateError": 0.0002, "monoRatio": 1e-8, "monoFloor": 1e-20, "recentLockFrames": 288000, "fruitlessFrames": 1440000, "heardPower": 1e-8,
+    "recentLockDistance": 8, "maxSlots": 4, "handoverRadius": 24, "handoverPerFrame": 0.0004, "localBack": 28800,
+    "localPoints": 1200,
+    "confirmLow": 0.038518362, "confirmHigh": 0.407615152, "confirmFrames": 15360, "confirmWarmup": 768,
+    "confirmLags": [8, 16, 24, 32, 40], "confirmCorrelation": 0.25, "confirmMargin": 0.003, "confirmPasses": 2,
+    "trackRadius": 12, "trackFrames": 4096, "trackEveryBlocks": 4, "trackFineSteps": 16, "sincTaps": 32, "sincPhases": 1024,
+    "sincBeta": 8.6, "trackPeak": 0.9, "trackSidelobe": 0.05, "jumpOffset": 0.5, "resetOffset": 0.25, "realignFrames": 192000,
+    "spectrumFft": 1024, "spectrumHop": 256, "spectrumFrames": 21, "cutoffs": 101, "cutoffLowHz": 500, "cutoffSpan": 46,
+    "noCutoffHz": 24000, "bypassCutoffHz": 23999, "snapCutoffHz": 23990,
+    "fitEdges": [20, 250, 500, 1500, 3250, 6500, 10000, 16000, 20001], "fitCoherence": 0.65, "fitPowerRatio": 1e-9,
+    "fitMinBins": 2, "fitBandCoherence": 0.75, "fitMinMagnitude": 1e-8, "fitMaxWeight": 20, "fitWeightFloor": 0.02,
+    "fitMinBands": 4, "fitNoCutoffMargin": 0.0025, "fitMinGain": 1e-5, "fitMaxGain": 2, "fitMaxError": 0.099856,
+    "smoothing": 0.16, "gainDownDb": 0.64, "gainUpDb": 0.8, "cutoffStepOctaves": 0.10666666666666666,
+    "presenceRing": 32, "presenceEffective": 0.25, "presenceLow": 0.09, "presenceHigh": 0.36, "presenceDown": 0.016,
+    "presenceUp": 0.16,
+    "crossovers": [500, 3250, 6500], "energyBlocks": 8, "louderLimitDb": 1.5, "mismatchPower": 3.84e-10,
+    "mismatchRatio": 0.1, "mismatchBands": 2, "recoverBlocks": 38, "fadeInSeconds": 0.5, "fadeOutSeconds": 0.3,
+    "switchSeconds": 0.01,
+    "qualityLowHz": 100, "qualityHighHz": 3200, "qualityFloor": 1e-24, "qualityBad": 0.1, "qualityBlocks": 188,
+    "qualityMaxBad": 124, "qualityDrop": 0.25, "qualityReturn": 0.6, "forgetFrames": 2880000,
+    "trackFilter": [
+      [0.09398085143379442, 0.18796170286758884, 0.09398085143379442, 0.29808827664000576, 0.12197872109365555],
+      [1, -2, 1, -1.0301390842088836, 0.32436911570995297],
+      [1, 2, 1, 0.7673189938478382, 0.599256573550772],
+      [1, -2, 1, -1.4993698014167163, 0.7450276090027126]
+    ]
+  },
+  "footstep": {
+    "gainDb": [0, 0.9, 1.7, 2.6, 3.5, 4.4, 5.3, 6.4, 8.2, 9.8, 11.6],
+    "lookaheadSeconds": 0.00075, "ceiling": 0.966, "levelCutoffHz": 0.1, "levelTarget": 0.32, "minimumBoost": 1.06,
+    "loudPeakDb": -9, "attackSeconds": 0.002, "releaseSeconds": 0.02, "highPassHz": 60, "highPassQ": 0.707
+  },
+  "boom": {
+    "light": [-10, 4, 6], "medium": [-10.8, 10, 1], "strong": [-20, 4, 6],
+    "lookaheadSeconds": 0.002, "holdSeconds": 0.01, "attackSeconds": 0.0001, "fastReleaseSeconds": 0.02,
+    "slowReleaseSeconds": 0.25, "slowAboveDb": 3, "fastBelowDb": 1, "modeHoldSeconds": 0.12
+  },
+  "limiter": { "ceilingDb": -1, "lookaheadSeconds": 0.001, "heavyDb": 3, "windowSeconds": 0.5, "warnAbove": 0.2, "clearBelow": 0.1 }
+}

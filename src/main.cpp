@@ -28,7 +28,7 @@
 #include <stdexcept>
 
 void runProtocolTests();
-namespace hikari { void runLifecycleTests(); void runStorageTests(); void runHostTests(); void runUpstreamEnumerationFailureTests(); void runAudioPassthruTests(); }
+namespace hikari { void runDeltaTests(); void runWindTests(); void runLifecycleTests(); void runStorageTests(); void runHostTests(); void runUpstreamEnumerationFailureTests(); void runAudioPassthruTests(); }
 static void printJson(const hikari::Json& value) {
     auto text = value.stringify() + "\n"; DWORD written;
     auto output = GetStdHandle(STD_OUTPUT_HANDLE);
@@ -85,7 +85,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int) {
             test("lifecycle", hikari::runLifecycleTests); test("storage", hikari::runStorageTests); test("host", hikari::runHostTests);
             test("audio-format", hikari::runAudioFormatTests); test("audio-identity", hikari::runAudioIdentityTests);
             test("output-recovery", hikari::runOutputRecoveryTests);
-            test("dsp", hikari::runDspTests); test("transition", hikari::runTransitionTests); test("measure", hikari::runMeasureTests);
+            test("dsp", hikari::runDspTests); test("transition", hikari::runTransitionTests);
+            test("delta", hikari::runDeltaTests); test("wind", hikari::runWindTests); test("measure", hikari::runMeasureTests);
             printJson(hikari::Json::object({{"ok", true}, {"selfTest", "passed"}, {"eqVectorPoints", 14336}, {"audioDevicesTouched", false}})); return 0;
         }
         if (command == L"--probe-devices") { printJson(hikari::probeDevices()); return 0; }

@@ -52,6 +52,15 @@ mutate(setupPath, value => value.replace(hook, `${hook}\n\thr = S_OK;`));
 mutate(setupPath, value => moveHook(value, 'if (cast_handle->pAudioClientPlayback->IsFormatSupported('));
 mutate(setupPath, value => moveHook(value, '// Get the actual size of the allocated buffer in sample sets'));
 mutate(setupPath, value => moveHook(value, '// Get the size of the allocated buffer, this is in sample sets'));
+const capturePath = path.join(root, 'build/upstream/audiopassthru/src/sndDevices/sndDevicesDoCapture.cpp');
+for (const file of [capturePath, path.join(root, 'build/upstream/audiopassthru/include/u_AudioPassthru.h'), path.join(root, 'build/upstream/audiopassthru/src/AudioPassthru/AudioPassthru.cpp')])
+  mutate(file, value => value.replace('// Hikari modification 2026-11-24:', '// Removed modification notice:'));
+mutate(capturePath, value => value.replace('&hikariDevicePosition, NULL);', 'NULL, NULL);'));
+mutate(capturePath, value => value.replace('flags, hikariDevicePosition);', '0, hikariDevicePosition);'));
+mutate(capturePath, value => value.replace('hikariOnCapturePacket(', 'if (false) hikariOnCapturePacket('));
+mutate(path.join(root, 'build/upstream/audiopassthru/src/AudioPassthru/AudioPassthru.cpp'), value => value.replace('!data_->hikariWorkerStopped()) return;', 'false) return;'));
+mutate(path.join(root, 'build/upstream/audiopassthru/include/u_AudioPassthru.h'), value => value.replace('== OKAY && !timedOut) return true;', '== OKAY) return true;'));
+mutate(path.join(root, 'build/upstream/audiopassthru/include/u_AudioPassthru.h'), value => value.replace('hikariOnWorkerStuck(hProcessingThread_);', ''));
 const formatPath = path.join(root, 'src/audio_format.cpp');
 for (const mask of ['0x3', '0x33', '0x3f', '0x60f', '0x63f']) mutate(formatPath,
   value => value.replace(new RegExp(`mask == ${mask}(?![0-9a-f])`), 'mask == 0'));

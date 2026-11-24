@@ -1,0 +1,36 @@
+# Hikari capture gap report: tells the host how many frames were lost in front of a packet.
+diff --git a/audiopassthru/src/sndDevices/sndDevicesDoCapture.cpp b/audiopassthru/src/sndDevices/sndDevicesDoCapture.cpp
+index 534bd59..1dd8e0a 100644
+--- a/audiopassthru/src/sndDevices/sndDevicesDoCapture.cpp
++++ b/audiopassthru/src/sndDevices/sndDevicesDoCapture.cpp
+@@ -1,3 +1,4 @@
++// Hikari modification 2026-11-24: isolated headless host integration; see MODIFICATIONS.md.
+ /*
+ FxSound
+ Copyright (C) 2025  FxSound LLC
+@@ -15,6 +16,7 @@ GNU Affero General Public License for more details.
+ You should have received a copy of the GNU Affero General Public License
+ along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ */
++#include "hikari_upstream_hooks.h"
+ #include "codedefs.h"
+ 
+ /* Standard includes */
+@@ -169,14 +171,12 @@ int PT_DECLSPEC sndDevicesDoCapture(PT_HANDLE *hp_sndDevices, float **fpp_buffer
+ 			if( packetLength > 0 )
+ 			{
+ 				// Get the data in this packet.
++				UINT64 hikariDevicePosition = 0;
+ 				hr = cast_handle->pAudioCaptureLoopback->GetBuffer(&(cast_handle->pDataPacketCapture), &(cast_handle->numCaptureFramesAvailable), &flags,
+-#ifdef _DEBUG
+-					&DevicePosition, &QPCPosition);
+-#else
+-					NULL, NULL);
+-#endif
++					&hikariDevicePosition, NULL);
+ 				if (FAILED(hr)) goto Exit;
+ 
++				hikariOnCapturePacket(static_cast<int>(cast_handle->capturedFramesCount), static_cast<int>(cast_handle->numCaptureFramesAvailable), flags, hikariDevicePosition);
+ 				fptr = (float *)(cast_handle->pDataPacketCapture);
+ 
+ 				loopsize = cast_handle->numCaptureFramesAvailable * numCaptureChannels;

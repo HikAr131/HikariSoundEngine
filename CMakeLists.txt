@@ -2,7 +2,7 @@
 # Copyright (C) 2026 Hikari
 cmake_minimum_required(VERSION 3.25)
 cmake_policy(SET CMP0091 NEW)
-project(HikariSoundEngine VERSION 1.0.5 LANGUAGES C CXX RC)
+project(HikariSoundEngine VERSION 1.1.0 LANGUAGES C CXX RC)
 if(NOT MSVC OR NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
   message(FATAL_ERROR "MSVC v143 x64 is required")
 endif()
@@ -41,6 +41,9 @@ target_compile_definitions(fxsound_dsp PRIVATE PT_NON_MFC DSPSOFT_TARGET PT_DSP_
 upstream_library(fxsound_audio "${UPSTREAM}/audiopassthru/audiopassthru.vcxproj")
 
 file(GLOB HOST_SOURCES CONFIGURE_DEPENDS "src/*.cpp" "tests/*.cpp")
+set(DELTA_SOURCES src/delta_profile.cpp src/delta_post.cpp src/footstep_booster.cpp src/boom_compressor.cpp
+  src/output_limiter.cpp src/lookahead_limiter.cpp src/resampler.cpp src/wind_canceller.cpp src/wind_fingerprint.cpp
+  src/wind_model.cpp src/wind_reference.cpp src/wind_stage.cpp src/wind_tracker.cpp)
 set_source_files_properties(tests/upstream_enumeration_failure_tests.cpp PROPERTIES
   COMPILE_OPTIONS "/Zc:strictStrings-;/wd4100;/wd4189;/wd4996")
 add_executable(HikariSoundEngine WIN32 ${HOST_SOURCES} src/version.rc app.manifest)
@@ -58,7 +61,8 @@ target_link_options(HikariSoundEngine PRIVATE /Brepro /DEBUG:NONE /INCREMENTAL:N
 set_target_properties(HikariSoundEngine PROPERTIES VS_GLOBAL_EnableManagedIncrementalBuild false)
 
 add_executable(HikariDspSelfTest EXCLUDE_FROM_ALL tools/dsp-selftest-main.cpp
-  src/dsp_adapter.cpp src/eq_stage.cpp src/parameters.cpp src/parametric_eq.cpp src/graphic_eq.cpp tests/dsp_tests.cpp)
+  src/dsp_adapter.cpp src/eq_stage.cpp src/parameters.cpp src/parametric_eq.cpp src/graphic_eq.cpp tests/dsp_tests.cpp
+  ${DELTA_SOURCES})
 target_compile_options(HikariDspSelfTest PRIVATE /Brepro /utf-8 /W4 /permissive- /EHsc)
 target_compile_definitions(HikariDspSelfTest PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 target_include_directories(HikariDspSelfTest PRIVATE src tools
@@ -66,3 +70,13 @@ target_include_directories(HikariDspSelfTest PRIVATE src tools
 target_link_libraries(HikariDspSelfTest PRIVATE fxsound_audio fxsound_dsp
   ole32 oleaut32 uuid winmm advapi32 propsys shell32 shlwapi user32)
 target_link_options(HikariDspSelfTest PRIVATE /Brepro /DEBUG:NONE /INCREMENTAL:NO /OPT:REF /OPT:ICF)
+
+add_executable(HikariDeltaRealtimeTest tools/delta-realtime-main.cpp src/dsp_adapter.cpp src/eq_stage.cpp src/parameters.cpp
+  src/parametric_eq.cpp src/graphic_eq.cpp src/security.cpp ${DELTA_SOURCES})
+target_compile_options(HikariDeltaRealtimeTest PRIVATE /Brepro /utf-8 /W4 /permissive- /EHsc)
+target_compile_definitions(HikariDeltaRealtimeTest PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+target_include_directories(HikariDeltaRealtimeTest PRIVATE src tools
+  "${UPSTREAM}/dsp/include" "${UPSTREAM}/audiopassthru/include")
+target_link_libraries(HikariDeltaRealtimeTest PRIVATE fxsound_audio fxsound_dsp
+  ole32 oleaut32 uuid winmm advapi32 propsys shell32 shlwapi user32)
+target_link_options(HikariDeltaRealtimeTest PRIVATE /Brepro /DEBUG:NONE /INCREMENTAL:NO /OPT:REF /OPT:ICF)

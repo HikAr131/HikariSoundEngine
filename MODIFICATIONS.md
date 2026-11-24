@@ -105,3 +105,20 @@ normalization, volume leveling, master gain) are applied once per DSP
 instance; the setters stay serialized with processing because the upstream
 DSP is not thread-safe. The playback `Initialize` report described in the
 table above is the only new patch hook.
+
+`patches/03-capture-gap.patch` (2026-11-24, 1.1.0) asks the loopback capture client for the device position of
+every packet and reports it, with the packet flags, to the host right after `GetBuffer`. The capture loop itself
+is unchanged. The host only uses the position to size a discontinuity that Windows reports.
+
+`patches/04-worker-shutdown.patch` (2026-11-24, 1.1.0): the upstream destructor waits three seconds for its worker
+and returns early when that times out, but the owner then freed the object the worker was still using. The owner
+now keeps such an object allocated and reports it to the host; the worker has been told to stop and ends by itself.
+All upstream objects share one static device state, so the host starts no new audio object before the worker has
+ended, and starts again by itself then. It restores the default device on its own in between, as before.
+
+Host-side handling added in 1.1.0 changes no upstream code. While the game profile is on, the upstream DSP is not
+called at all. Measured with the five effects at zero it is not transparent: it delays by 36 frames and raises
+sustained loud material by about 0.5 dB (residual about -25 dB for sine and square waves from 0.6 of full scale;
+below that, and for noise and bursts, the output is bit-identical to a 36-frame delay). The profile ends in its own
+limiter, so nothing depends on the upstream one. The host crossfades between the two paths over 20 ms after running
+the entering one silently for 100 ms.

@@ -18,7 +18,11 @@ struct Endpoint;
 Json::Array fallbackRoleRecords(const Endpoint& endpoint);
 // Every engine audio object starts here: the upstream constructor leaves its mute flag unwritten.
 std::unique_ptr<AudioPassthru> createAudioPassthru();
+// True while an upstream worker that did not stop in time is still running; the upstream keeps one shared device
+// state, so no new audio object may be created before it has ended.
+bool audioWorkerStuck();
 int runEngine(const RunOptions& options);
 int runGuard(const RunOptions& options, unsigned long pid, const std::string& creation, const std::string& instance);
 Json probeDevices();
+Json helloResponse();
 }

@@ -24,7 +24,29 @@ unsigned char firstByte(const Field& field) {
 }
 
 namespace hikari {
+namespace {
+// A worker that outlives the upstream timeout must keep its object, and no new audio may start before it ends.
+void testStuckWorker() {
+    if (audioWorkerStuck()) throw std::runtime_error("A stuck worker is reported before one exists");
+    HANDLE release = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    HANDLE worker = CreateThread(nullptr, 0, [](LPVOID event) -> DWORD { WaitForSingleObject(static_cast<HANDLE>(event), 60000); return 0; }, release, 0, nullptr);
+    if (!release || !worker) throw std::runtime_error("Stuck worker fixture failed");
+    auto audio = createAudioPassthru();
+    auto* kept = audio->data_;
+    kept->hProcessingThread_ = worker;
+    audio.reset();
+    const bool stuck = audioWorkerStuck();
+    // Only an object that is still allocated can be asked again, and only then does the worker have to be gone.
+    SetEvent(release);
+    WaitForSingleObject(worker, 5000);
+    const bool ended = !audioWorkerStuck();
+    const bool stopped = kept->hikariWorkerStopped();
+    CloseHandle(release);
+    if (!stuck || !ended || !stopped) throw std::runtime_error("A worker that did not stop in time is not kept apart");
+}
+}
 void runAudioPassthruTests() {
+    testStuckWorker();
     constexpr unsigned char poison = 0x41;
     // The heap may hand out another block, so retry until an object lands on the poisoned one. The DSP pointer is
     // just as unwritten at this point, which makes it the witness that this object really reused that memory.

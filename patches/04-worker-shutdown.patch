@@ -1,0 +1,44 @@
+# Hikari worker shutdown: an object whose worker did not stop in time is never freed.
+diff --git a/audiopassthru/include/u_AudioPassthru.h b/audiopassthru/include/u_AudioPassthru.h
+index fdf31b1..d768cd1 100644
+--- a/audiopassthru/include/u_AudioPassthru.h
++++ b/audiopassthru/include/u_AudioPassthru.h
+@@ -1,3 +1,5 @@
++// Hikari modification 2026-11-24: isolated headless host integration; see MODIFICATIONS.md.
++#include "hikari_upstream_hooks.h"
+ /*
+ FxSound
+ Copyright (C) 2025  FxSound LLC
+@@ -36,6 +38,14 @@ public:
+ class AudioPassthruPrivate
+ {
+ public:
++	// False while the worker could not be stopped in time and therefore still uses this object.
++	bool hikariWorkerStopped()
++	{
++		int timedOut = IS_FALSE;
++		if (killProcessingThread(&timedOut) == OKAY && !timedOut) return true;
++		hikariOnWorkerStuck(hProcessingThread_);
++		return false;
++	}
+ 	AudioPassthruPrivate();
+ 	~AudioPassthruPrivate();
+ 	int init();
+diff --git a/audiopassthru/src/AudioPassthru/AudioPassthru.cpp b/audiopassthru/src/AudioPassthru/AudioPassthru.cpp
+index 57b8592..499d482 100644
+--- a/audiopassthru/src/AudioPassthru/AudioPassthru.cpp
++++ b/audiopassthru/src/AudioPassthru/AudioPassthru.cpp
+@@ -1,3 +1,4 @@
++// Hikari modification 2026-11-24: isolated headless host integration; see MODIFICATIONS.md.
+ /*
+ FxSound
+ Copyright (C) 2025  FxSound LLC
+@@ -28,6 +29,8 @@ AudioPassthru::AudioPassthru()
+ 
+ AudioPassthru::~AudioPassthru()
+ {
++	// A worker that still runs on this object ends by itself; freeing it here would pull the memory from under it.
++	if (data_ != NULL && !data_->hikariWorkerStopped()) return;
+ 	delete data_;
+ }
+ 

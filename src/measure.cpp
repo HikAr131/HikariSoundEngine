@@ -49,7 +49,12 @@ static Json measureAt(const Parameters& parameters, unsigned rate, const std::ve
         double gain = 20 * std::log10(std::max(std::abs(sum) / amplitude, 1e-15));
         frequencies.emplace_back(frequency); gains.emplace_back(gain);
     }
-    return Json::object({{"ok", true}, {"sampleRate", rate}, {"channels", 2}, {"frequencies", frequencies}, {"gainDb", gains}, {"latencyFrames", latency}, {"impulseFrames", frames}, {"inputAmplitude", amplitude}});
+    const auto added = adapter.deltaLatency();
+    Json deltaLatency;
+    if (parameters.delta.enabled) deltaLatency = Json::object({{"windFrames", added.wind}, {"footstepFrames", added.footstep}, {"boomFrames", added.boom},
+        {"limiterFrames", added.limiter}, {"totalFrames", added.total()}, {"totalMs", 1000.0 * static_cast<double>(added.total()) / rate},
+        {"replacedUpstreamFrames", added.upstream}});
+    return Json::object({{"ok", true}, {"sampleRate", rate}, {"deltaLatency", deltaLatency}, {"channels", 2}, {"frequencies", frequencies}, {"gainDb", gains}, {"latencyFrames", latency}, {"impulseFrames", frames}, {"inputAmplitude", amplitude}});
 }
 Json measureResponse(const Parameters& parameters, unsigned rate) {
     std::vector<double> frequencies;

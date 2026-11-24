@@ -2,6 +2,8 @@
 #include "json.h"
 #include "protocol.h"
 #include "pipe_server.h"
+#include "runtime.h"
+#include "version.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -95,13 +97,15 @@ Json readTestLine(HANDLE pipe) {
 void pipeSmoke() {
     const auto name = currentSessionPipeName() + L".selftest." + std::to_wstring(GetCurrentProcessId());
     PipeServer server([](const Json& request) {
-        if (request.at("cmd").asString() == "hello") return Json::object({{"ok", true}, {"protocol", 1}});
+        if (request.at("cmd").asString() == "hello") return helloResponse();
         return Json::object({{"ok", true}, {"state", "offline-test"}});
     }, name);
     server.start();
     const auto reply = PipeServer::requestOnce(Json::object({{"id", 7}, {"cmd", "hello"}}), 2000, name);
-    require(reply.at("ok").asBool() && reply.at("id").asNumber() == 7 && reply.at("protocol").asNumber() == 1,
-            "Offline pipe hello failed");
+    require(reply.at("ok").asBool() && reply.at("id").asNumber() == 7, "Offline pipe hello failed");
+    const auto& features = reply.at("features").asArray();
+    require(reply.at("protocol").asNumber() == 2 && reply.at("version").asString() == HIKARI_VERSION_STRING &&
+            features.size() == 1 && features[0].asString() == "delta-profile-1", "Hello does not announce the delta profile");
     bool duplicateRejected = false;
     try {
         PipeServer duplicate([](const Json&) { return Json::object({{"ok", true}}); }, name);

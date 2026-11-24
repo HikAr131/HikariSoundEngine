@@ -12,6 +12,7 @@
 #include "parameter_json.h"
 #include "pipe_server.h"
 #include "dsp_adapter.h"
+#include "delta_status.h"
 #include "version.h"
 #include "startup_diagnostics.h"
 #include "AudioPassthru.h"
@@ -63,6 +64,16 @@ static void enqueueDefaultDeviceChanged(int flow, int role, const wchar_t* id) {
 void hikariOnDefaultDeviceChanged(int flow, int role, const wchar_t* id) {
     if (!persistentNotifications.load()) enqueueDefaultDeviceChanged(flow, role, id);
 }
+namespace {
+std::mutex stuckWorkersMutex;
+std::vector<HANDLE> stuckWorkers;
+}
+void hikariOnWorkerStuck(HANDLE thread) noexcept {
+    hikariLogUpstreamError(L"Audio worker did not stop in time; its object stays allocated");
+    HANDLE copy = nullptr;
+    if (!thread || !DuplicateHandle(GetCurrentProcess(), thread, GetCurrentProcess(), &copy, SYNCHRONIZE, FALSE, 0)) return;
+    try { std::lock_guard<std::mutex> lock(stuckWorkersMutex); stuckWorkers.push_back(copy); } catch (...) { CloseHandle(copy); }
+}
 void hikariOnOwnDefaultWrite(unsigned role, const wchar_t* id) {
     if (!id || (role != eConsole && role != eMultimedia)) return;
     std::lock_guard<std::mutex> lock(defaultEventsMutex);
@@ -74,6 +85,10 @@ using Microsoft::WRL::ComPtr;
 static Json endpointJson(const Endpoint& e) {
     return Json::object({{"id", utf8(e.id)}, {"name", e.name}, {"isVirtual", e.virtualDevice},
         {"isDefault", e.consoleDefault || e.multimediaDefault}, {"channels", e.channels}, {"sampleRate", e.sampleRate}});
+}
+Json helloResponse() {
+    return Json::object({{"ok", true}, {"name", "HikariSoundEngine"}, {"version", HIKARI_VERSION_STRING},
+        {"protocol", HIKARI_PROTOCOL_VERSION}, {"features", Json::Array{Json(HIKARI_FEATURE_DELTA)}}, {"pid", GetCurrentProcessId()}});
 }
 Json probeDevices() {
     Json::Array list;
@@ -94,6 +109,15 @@ std::unique_ptr<AudioPassthru> createAudioPassthru() {
     // skips every playback write while the engine still reports processing, so the output stays silent.
     audio->mute(false);
     return audio;
+}
+bool audioWorkerStuck() {
+    std::lock_guard<std::mutex> lock(stuckWorkersMutex);
+    stuckWorkers.erase(std::remove_if(stuckWorkers.begin(), stuckWorkers.end(), [](HANDLE worker) {
+        if (WaitForSingleObject(worker, 0) != WAIT_OBJECT_0) return false;
+        CloseHandle(worker);
+        return true;
+    }), stuckWorkers.end());
+    return !stuckWorkers.empty();
 }
 static Json error(const char* code, const char* message) {
     return Json::object({{"ok", false}, {"code", code}, {"message", message}});
@@ -296,8 +320,8 @@ public:
         };
         Json response;
         try {
-            if (cmd == "hello") response = Json::object({{"ok", true}, {"name", "HikariSoundEngine"}, {"version", HIKARI_VERSION_STRING}, {"protocol", HIKARI_PROTOCOL_VERSION}, {"pid", GetCurrentProcessId()}});
-            else if (cmd == "status" || cmd == "subscribe") { response = status(); }
+            if (cmd == "hello") response = helloResponse();
+            else if (cmd == "status" || cmd == "subscribe") { response = status(deltaSnapshot()); }
             else if (cmd == "devices") { response = devices(); }
             else if (cmd == "apply") {
                 auto p = parseParameters(request.at("params"));
@@ -314,14 +338,14 @@ public:
                 if (mode != "fixed" && mode != "follow") throw JsonError("Invalid output mode");
                 mutationStarted = true;
                 mode_ = mode; fixedId_ = fixed; if (!fixed.empty()) remember(fixed);
-                selectOutput(); stopAudio(); startAudio(); persist(false); response = status();
+                selectOutput(); stopAudio(); startAudio(); persist(false); response = status(deltaSnapshot());
             } else if (cmd == "set-buffer") {
                 const auto ms = request.at("ms").asNumber();
                 if (!std::isfinite(ms)) throw JsonError("Invalid buffer duration");
                 mutationStarted = true;
                 bufferMs_ = static_cast<int>(std::clamp(ms, 10.0, 100.0));
                 if (audio_) { stopAudio(); startAudio(); }
-                ++reinitCount_; lastReinitReason_ = "buffer-change"; persist(false); response = status();
+                ++reinitCount_; lastReinitReason_ = "buffer-change"; persist(false); response = status(deltaSnapshot());
             } else if (cmd == "quit") { quitting_ = true; response = Json::object({{"ok", true}}); }
             else response = error("BAD_REQUEST", "Unknown command");
         } catch (const JsonError&) {
@@ -334,7 +358,11 @@ public:
         return withId(response, request);
     }
     static Json withId(Json response, const Json& request) { if (auto id = request.get("id")) response["id"] = *id; return response; }
-    Json status() const {
+    // The live state of the profile's own stages; without audio objects only the switches are known.
+    DeltaSnapshot deltaSnapshot() {
+        return dsp_ ? DeltaSnapshot::from(dsp_->deltaStatus()) : DeltaSnapshot::idle(parameters_);
+    }
+    Json status(const DeltaSnapshot& delta) const {
         Json output = Json();
         auto e = findEndpoint(outputId_);
         if (e) { output = endpointJson(*e); output["mode"] = mode_; }
@@ -347,7 +375,7 @@ public:
             {"bufferMs", bufferMs_}, {"stats", Json::object({{"underruns", Json()}, {"underrunMeasurementAvailable", false}, {"reinitCount", reinitCount_}, {"uptimeSec", (GetTickCount64() - started_) / 1000}, {"lastReinitReason", lastReinitReason_},
                 {"applyLockMaxUs", dsp_ ? Json((dsp_->stats().applyLockMaxNanoseconds + 999) / 1000) : Json()}})},
             {"conflict", Json::object({{"detected", state_ == "yielded"}, {"lastDefaultName", lastDefaultName_}})},
-            {"applied", parametersJson(parameters_)}, {"lastError", lastError_}});
+            {"applied", parametersJson(parameters_)}, {"delta", delta.json()}, {"lastError", lastError_}});
     }
     void tick() {
         if (quitting_ || shutdown_) return;
@@ -393,6 +421,7 @@ public:
             const bool formatChanged = selected && (!selected->formatSupported || selected->channels != outputChannels_ || selected->sampleRate != outputRate_);
             if (before != outputId_ || captureChanged || formatChanged || !audio_) { stopAudio(); startAudio(); ++reinitCount_; lastReinitReason_ = "device-change"; persist(false); }
         }
+        if (waitingForWorker_ && !audioWorkerStuck()) { startAudio(); ++reinitCount_; lastReinitReason_ = "worker-ended"; persist(false); }
         if (audio_) {
             audio_->processTimer();
             serviceOutputRecovery();
@@ -490,6 +519,8 @@ private:
             stopAudio(); state_ = "idle-no-device"; lastError_ = error(code, message);
             restoreOwnedState(); persist(false);
         };
+        waitingForWorker_ = audioWorkerStuck();
+        if (waitingForWorker_) { inactive("INTERNAL", "Audio worker is still stopping"); return; }
         if (!recoveryPending_) { step(StartupStep::outputRefresh); endpoints_ = enumerateEndpoints(); selectOutput(); }
         unsigned virtualCount = 0;
         std::wstring capture;
@@ -527,7 +558,7 @@ private:
         persist(false);
         { std::lock_guard<std::mutex> lock(preferredOutputMutex); preferredOutput = outputId_; }
         step(StartupStep::dspCreate);
-        auto dsp = std::make_unique<DspAdapter>();
+        auto dsp = std::make_unique<DspAdapter>(std::filesystem::path(executablePath()).parent_path() / WindReferenceSet::kFileName);
         step(StartupStep::dspApply);
         dsp->apply(parameters_);
         step(StartupStep::dspFormat);
@@ -595,7 +626,7 @@ private:
     std::unique_ptr<DspAdapter> dsp_; std::unique_ptr<AudioPassthru> audio_;
     ComPtr<IMMDeviceEnumerator> enumerator_; ComPtr<Notifications> notifications_;
     bool registered_ = false, paused_ = false, quitting_ = false, processing_ = false, shutdown_ = false, clean_ = false;
-    bool guardianReady_ = false, recoveryPending_ = false;
+    bool guardianReady_ = false, recoveryPending_ = false, waitingForWorker_ = false;
 };
 struct Pending {
     Json request;
@@ -689,6 +720,7 @@ int runEngine(const RunOptions& options) {
     WTSRegisterSessionNotification(window, NOTIFY_FOR_THIS_SESSION);
     diagnostics.complete();
     auto previous = std::string();
+    DeltaEventGate deltaEvents;
     try {
         while (!stop && !engine.quitting() && WaitForSingleObject(event.get(), 0) != WAIT_OBJECT_0) {
             MSG message;
@@ -698,7 +730,7 @@ int runEngine(const RunOptions& options) {
             { std::lock_guard<std::mutex> lock(queueMutex); requests.swap(queue); }
             for (auto& request : requests) if (!request->cancelled) request->result.set_value(engine.dispatch(request->request));
             engine.tick();
-            auto status = engine.status(); auto serialized = status.stringify();
+            auto status = engine.status(deltaEvents.filter(engine.deltaSnapshot(), GetTickCount64()));
             // Uptime is omitted from the event comparison to avoid pushing unchanged state every tick.
             auto comparable = status; comparable["stats"]["uptimeSec"] = 0;
             if (comparable.stringify() != previous) { previous = comparable.stringify(); status["event"] = "state"; pipe.broadcast(status); }
